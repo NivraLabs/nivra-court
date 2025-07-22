@@ -8,7 +8,7 @@ authors = ["Rasmus Suni (rasmus.suni@nivracourt.io)", "Elmeri Kemppainen (elmeri
 
 
 [addresses]
-
+nivra_court = "0x0"
 
 [dev-dependencies]
 
