@@ -2,7 +2,7 @@ module nivra_court::nivra_court;
 
 // === Constants ===
 #[allow(unused_const)]
-const VERSION: u64 = 0;
+const VERSION: u64 = 1;
 
 // === Structs ===
 public struct AdminCap has key {
