@@ -19,3 +19,7 @@ fun init(ctx: &mut TxContext) {
 }
 
 // === Test Functions ===
+#[test_only]
+public fun get_admin_cap_for_testing(ctx: &mut TxContext): AdminCap {
+    AdminCap { id: object::new(ctx) }
+}
