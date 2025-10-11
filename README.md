@@ -9,7 +9,7 @@ Nivra Court is a decentralized arbitration protocol for Sui network's smart cont
 
 ### Deploy the smart contracts:
 
-Navigate to the `smart_contracts/nivra_court` folder and run:
+Navigate to the `packages/nivra` folder and run:
 ```
 sui client publish
 ```
