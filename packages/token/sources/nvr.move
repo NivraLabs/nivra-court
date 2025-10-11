@@ -10,7 +10,7 @@ fun init(otw: NVR, ctx: &mut TxContext) {
         otw, 
         6, 
         b"NVR", 
-        b"Nivra Token", 
+        b"Nivra", 
         b"The native token for the Nivra arbitration protocol.", 
         option::some(new_unsafe_from_bytes(b"https://static.nivracourt.io/icon.svg")), 
         ctx
