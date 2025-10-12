@@ -1,0 +1,9 @@
+[package]
+name = "nivra"
+edition = "2024.beta"
+
+[dependencies]
+token = { local = "../token" }
+
+[addresses]
+nivra = "0x0"
