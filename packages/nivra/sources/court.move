@@ -65,7 +65,7 @@ public fun create_court(
     court_id
 }
 
-entry fun update_treasury_address(self: &mut Court, court_registry: &mut CourtRegistry, _cap: &NivraAdminCap) {
+entry fun update_treasury_address(self: &mut Court, court_registry: &CourtRegistry, _cap: &NivraAdminCap) {
     let latest_treasury_address = court_registry.treasury_address();
     let self = self.load_inner_mut();
     self.treasury_address = latest_treasury_address;
@@ -80,4 +80,9 @@ entry fun migrate(self: &mut Court, _cap: &NivraAdminCap) {
 public(package) fun load_inner_mut(self: &mut Court): &mut CourtInner {
     assert!(self.inner.version() == current_version(), EWrongVersion);
     self.inner.load_value_mut()
+}
+
+public(package) fun load_inner(self: &Court): &CourtInner {
+    assert!(self.inner.version() == current_version(), EWrongVersion);
+    self.inner.load_value()
 }

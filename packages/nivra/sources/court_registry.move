@@ -64,8 +64,8 @@ public fun set_treasury_address(self: &mut CourtRegistry, treasury_address: addr
     self.treasury_address = treasury_address;
 }
 
-public fun treasury_address(self: &mut CourtRegistry): address {
-    self.load_inner_mut().treasury_address
+public fun treasury_address(self: &CourtRegistry): address {
+    self.load_inner().treasury_address
 }
 
 entry fun migrate(self: &mut CourtRegistry, _cap: &NivraAdminCap) {
@@ -103,6 +103,11 @@ public(package) fun create_metadata(
 public(package) fun load_inner_mut(self: &mut CourtRegistry): &mut CourtRegistryInner {
     assert!(self.inner.version() == current_version(), EWrongVersion);
     self.inner.load_value_mut()
+}
+
+public(package) fun load_inner(self: &CourtRegistry): &CourtRegistryInner {
+    assert!(self.inner.version() == current_version(), EWrongVersion);
+    self.inner.load_value()
 }
 
 #[test_only]
