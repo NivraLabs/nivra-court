@@ -3,13 +3,24 @@ module nivra::court_registry;
 use sui::versioned::{Self, Versioned};
 use nivra::constants::current_version;
 use sui::table::{Self, Table};
-use nivra::court::Metadata;
+use std::ascii::String;
+use sui::url::Url;
 
 const EWrongVersion: u64 = 1;
 const ENotUpgrade: u64 = 2;
 
 public struct NivraAdminCap has key, store {
     id: UID,
+}
+
+public struct Metadata has copy, drop, store {
+    category: String,
+    name: String,
+    icon: Option<Url>,
+    description: String,
+    skills: vector<String>,
+    min_stake: u64, // (NVR)
+    reward: u64, // (Sui)
 }
 
 public struct CourtRegistry has key {
