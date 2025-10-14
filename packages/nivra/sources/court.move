@@ -6,6 +6,8 @@ use nivra::court_registry::NivraAdminCap;
 use std::ascii::String;
 use nivra::court_registry::create_metadata;
 use nivra::court_registry::CourtRegistry;
+use sui::balance::{Self, Balance};
+use token::nvr::NVR;
 
 const EWrongVersion: u64 = 1;
 const ENotUpgrade: u64 = 2;
@@ -17,6 +19,7 @@ public struct Court has key {
 
 public struct CourtInner has store {
     treasury_address: address,
+    stake_pool: Balance<NVR>,
     fee_rate: u64,
     min_stake: u64,
 }
@@ -35,6 +38,7 @@ public fun create_court(
 ): ID {
     let court_inner = CourtInner {
         treasury_address: court_registry.treasury_address(),
+        stake_pool: balance::zero<NVR>(),
         fee_rate, 
         min_stake, 
     };
@@ -63,6 +67,11 @@ public fun create_court(
     transfer::share_object(court);
 
     court_id
+}
+
+public fun stake_pool_size(self: &Court): u64 {
+    let self = self.load_inner();
+    balance::value(&self.stake_pool)
 }
 
 entry fun update_treasury_address(self: &mut Court, court_registry: &CourtRegistry, _cap: &NivraAdminCap) {
