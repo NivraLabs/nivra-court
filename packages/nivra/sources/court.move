@@ -8,6 +8,7 @@ use nivra::court_registry::create_metadata;
 use nivra::court_registry::CourtRegistry;
 use sui::balance::{Self, Balance};
 use token::nvr::NVR;
+use std::uq64_64;
 
 const EWrongVersion: u64 = 1;
 const ENotUpgrade: u64 = 2;
@@ -60,7 +61,7 @@ public fun create_court(
         description, 
         skills, 
         min_stake, 
-        fee_rate / 2,
+        uq64_64::from_int(fee_rate).mul(uq64_64::from_quotient(99,100)).to_int(),
     );
 
     court_registry.register_court(court_id, metadata);
