@@ -1,8 +1,11 @@
 module nivra::court;
 
-use sui::versioned::Versioned;
+use sui::versioned::{Self, Versioned};
 use nivra::constants::current_version;
 use nivra::court_registry::NivraAdminCap;
+use std::ascii::String;
+use nivra::court_registry::create_metadata;
+use nivra::court_registry::CourtRegistry;
 
 const EWrongVersion: u64 = 1;
 const ENotUpgrade: u64 = 2;
@@ -13,7 +16,51 @@ public struct Court has key {
 }
 
 public struct CourtInner has store {
+    fee_rate: u64,
+    min_stake: u64,
+}
 
+public fun create_court(
+    category: String,
+    name: String,
+    icon: Option<String>,
+    description: String,
+    skills: vector<String>,
+    min_stake: u64,
+    fee_rate: u64, // dispute opening fee per nivster (sui)
+    court_registry: &mut CourtRegistry,
+    _cap: &NivraAdminCap,
+    ctx: &mut TxContext,
+): ID {
+    let court_inner = CourtInner { 
+        fee_rate, 
+        min_stake, 
+    };
+
+    let court = Court { 
+        id: object::new(ctx), 
+        inner: versioned::create(
+            current_version(), 
+            court_inner, 
+            ctx
+        )
+    };
+
+    let court_id = object::id(&court);
+    let metadata = create_metadata(
+        category, 
+        name, 
+        icon, 
+        description, 
+        skills, 
+        min_stake, 
+        fee_rate / 2,
+    );
+
+    court_registry.register_court(court_id, metadata);
+    transfer::share_object(court);
+
+    court_id
 }
 
 entry fun migrate(self: &mut Court, _cap: &NivraAdminCap) {
