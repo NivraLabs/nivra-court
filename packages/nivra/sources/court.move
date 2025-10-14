@@ -16,6 +16,7 @@ public struct Court has key {
 }
 
 public struct CourtInner has store {
+    treasury_address: address,
     fee_rate: u64,
     min_stake: u64,
 }
@@ -32,7 +33,8 @@ public fun create_court(
     _cap: &NivraAdminCap,
     ctx: &mut TxContext,
 ): ID {
-    let court_inner = CourtInner { 
+    let court_inner = CourtInner {
+        treasury_address: court_registry.treasury_address(),
         fee_rate, 
         min_stake, 
     };
@@ -61,6 +63,12 @@ public fun create_court(
     transfer::share_object(court);
 
     court_id
+}
+
+entry fun update_treasury_address(self: &mut Court, court_registry: &mut CourtRegistry, _cap: &NivraAdminCap) {
+    let latest_treasury_address = court_registry.treasury_address();
+    let self = self.load_inner_mut();
+    self.treasury_address = latest_treasury_address;
 }
 
 entry fun migrate(self: &mut Court, _cap: &NivraAdminCap) {

@@ -31,11 +31,13 @@ public struct CourtRegistry has key {
 }
 
 public struct CourtRegistryInner has store {
+    treasury_address: address,
     courts: Table<ID, Metadata>,
 }
 
 fun init(ctx: &mut TxContext) {
     let court_registry_inner = CourtRegistryInner {
+        treasury_address: ctx.sender(),
         courts: table::new<ID, Metadata>(ctx),
     };
 
@@ -55,6 +57,15 @@ fun init(ctx: &mut TxContext) {
     };
 
     transfer::public_transfer(admin, ctx.sender());
+}
+
+public fun set_treasury_address(self: &mut CourtRegistry, treasury_address: address, _cap: &NivraAdminCap) {
+    let self = self.load_inner_mut();
+    self.treasury_address = treasury_address;
+}
+
+public fun treasury_address(self: &mut CourtRegistry): address {
+    self.load_inner_mut().treasury_address
 }
 
 entry fun migrate(self: &mut CourtRegistry, _cap: &NivraAdminCap) {
