@@ -2,6 +2,8 @@ module nivra::court_registry;
 
 use sui::versioned::{Self, Versioned};
 use nivra::constants::current_version;
+use sui::table::{Self, Table};
+use nivra::court::Metadata;
 
 const EWrongVersion: u64 = 1;
 const ENotUpgrade: u64 = 2;
@@ -16,12 +18,12 @@ public struct CourtRegistry has key {
 }
 
 public struct CourtRegistryInner has store {
-
+    courts: Table<ID, Metadata>,
 }
 
 fun init(ctx: &mut TxContext) {
     let court_registry_inner = CourtRegistryInner {
-
+        courts: table::new<ID, Metadata>(ctx),
     };
 
     let court_registry = CourtRegistry {
