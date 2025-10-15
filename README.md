@@ -11,6 +11,6 @@ Nivra Court is a decentralized arbitration protocol for Sui network's smart cont
 
 Navigate to the `packages/nivra` folder and run:
 ```
-sui client publish
+sui client publish --with-unpublished-dependencies
 ```
 
