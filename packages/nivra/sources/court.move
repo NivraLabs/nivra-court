@@ -8,9 +8,16 @@ use nivra::court_registry::create_metadata;
 use nivra::court_registry::CourtRegistry;
 use sui::balance::{Self, Balance};
 use token::nvr::NVR;
+use sui::linked_table::LinkedTable;
+use std::address;
 
 const EWrongVersion: u64 = 1;
 const ENotUpgrade: u64 = 2;
+
+public struct Stake has copy, drop, store {
+    amount: u64,
+    multiplier: u8,
+} 
 
 public struct Court has key {
     id: UID,
@@ -20,6 +27,7 @@ public struct Court has key {
 public struct CourtInner has store {
     treasury_address: address,
     stake_pool: Balance<NVR>,
+    stakes: LinkedTable<address, Stake>,
     fee_rate: u64,
     min_stake: u64,
 }
@@ -31,7 +39,7 @@ public fun create_court(
     description: String,
     skills: vector<String>,
     min_stake: u64,
-    fee_rate: u64, // dispute opening fee per nivster (sui)
+    fee_rate: u64,
     court_registry: &mut CourtRegistry,
     _cap: &NivraAdminCap,
     ctx: &mut TxContext,
@@ -39,6 +47,7 @@ public fun create_court(
     let court_inner = CourtInner {
         treasury_address: court_registry.treasury_address(),
         stake_pool: balance::zero<NVR>(),
+        stakes: LinkedTable::new(ctx),
         fee_rate, 
         min_stake, 
     };
