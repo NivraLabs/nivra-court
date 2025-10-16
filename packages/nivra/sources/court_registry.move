@@ -59,12 +59,6 @@ fun init(ctx: &mut TxContext) {
     transfer::public_transfer(admin, ctx.sender());
 }
 
-public fun get_courts_id(self: &CourtRegistry): ID {
-    let self = self.load_inner();
-    let courts_id = object::id(&self.courts);
-    courts_id
-}
-
 public fun set_treasury_address(self: &mut CourtRegistry, treasury_address: address, _cap: &NivraAdminCap) {
     let self = self.load_inner_mut();
     self.treasury_address = treasury_address;
