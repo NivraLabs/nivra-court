@@ -9,7 +9,7 @@ use nivra::court_registry::CourtRegistry;
 use sui::balance::{Self, Balance};
 use token::nvr::NVR;
 use sui::linked_table::LinkedTable;
-use std::address;
+use sui::linked_table;
 
 const EWrongVersion: u64 = 1;
 const ENotUpgrade: u64 = 2;
@@ -47,7 +47,7 @@ public fun create_court(
     let court_inner = CourtInner {
         treasury_address: court_registry.treasury_address(),
         stake_pool: balance::zero<NVR>(),
-        stakes: LinkedTable::new(ctx),
+        stakes: linked_table::new(ctx),
         fee_rate, 
         min_stake, 
     };
@@ -76,11 +76,6 @@ public fun create_court(
     transfer::share_object(court);
 
     court_id
-}
-
-public fun stake_pool_size(self: &Court): u64 {
-    let self = self.load_inner();
-    balance::value(&self.stake_pool)
 }
 
 entry fun update_treasury_address(self: &mut Court, court_registry: &CourtRegistry, _cap: &NivraAdminCap) {
