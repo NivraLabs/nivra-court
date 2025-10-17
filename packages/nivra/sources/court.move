@@ -107,12 +107,13 @@ public fun withdraw(self: &mut Court, ctx: &mut TxContext): Coin<NVR> {
     if (self.stakes.contains(sender)) {
         let stake = self.stakes.remove(sender);
         let amount = stake.amount;
+        let multiplier = stake.multiplier;
 
         if (stake.locked_amount > 0) {
             self.stakes.push_back(sender, Stake {
                 amount: 0,
                 locked_amount: stake.locked_amount,
-                multiplier: 1,
+                multiplier,
             });
         };
 
