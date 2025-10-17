@@ -14,6 +14,12 @@ use sui::coin::{Self, Coin};
 const EWrongVersion: u64 = 1;
 const ENotUpgrade: u64 = 2;
 const ENotEnoughNVR: u64 = 3;
+const ENotOperational: u64 = 4;
+
+public enum Status has copy, drop, store {
+    Running,
+    Halted,
+}
 
 public struct Stake has drop, store {
     amount: u64,
@@ -27,6 +33,7 @@ public struct Court has key {
 }
 
 public struct CourtInner has store {
+    status: Status,
     treasury_address: address,
     stake_pool: Balance<NVR>,
     stakes: LinkedTable<address, Stake>,
@@ -47,6 +54,7 @@ public fun create_court(
     ctx: &mut TxContext,
 ): ID {
     let court_inner = CourtInner {
+        status: Status::Running,
         treasury_address: court_registry.treasury_address(),
         stake_pool: balance::zero<NVR>(),
         stakes: linked_table::new(ctx),
@@ -84,6 +92,7 @@ public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
     let self = self.load_inner_mut();
     let amount = assets.value();
     assert!(amount >= self.min_stake, ENotEnoughNVR);
+    assert!(self.status == Status::Running, ENotOperational);
 
     coin::put(&mut self.stake_pool, assets);
     let sender = ctx.sender();
@@ -106,21 +115,24 @@ public fun withdraw(self: &mut Court, ctx: &mut TxContext): Coin<NVR> {
     
     if (self.stakes.contains(sender)) {
         let stake = self.stakes.remove(sender);
-        let amount = stake.amount;
-        let multiplier = stake.multiplier;
 
         if (stake.locked_amount > 0) {
             self.stakes.push_back(sender, Stake {
                 amount: 0,
                 locked_amount: stake.locked_amount,
-                multiplier,
+                multiplier: stake.multiplier,
             });
         };
 
-        coin::take(&mut self.stake_pool, amount, ctx)
+        coin::take(&mut self.stake_pool, stake.amount, ctx)
     } else {
         coin::zero<NVR>(ctx)
     }
+}
+
+public fun halt_operation(self: &mut Court, _cap: &NivraAdminCap) {
+    let self = self.load_inner_mut();
+    self.status = Status::Halted;
 }
 
 entry fun update_treasury_address(self: &mut Court, court_registry: &CourtRegistry, _cap: &NivraAdminCap) {
