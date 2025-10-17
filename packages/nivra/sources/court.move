@@ -8,14 +8,16 @@ use nivra::court_registry::create_metadata;
 use nivra::court_registry::CourtRegistry;
 use sui::balance::{Self, Balance};
 use token::nvr::NVR;
-use sui::linked_table::LinkedTable;
-use sui::linked_table;
+use sui::linked_table::{Self, LinkedTable};
+use sui::coin::{Self, Coin};
 
 const EWrongVersion: u64 = 1;
 const ENotUpgrade: u64 = 2;
+const ENotEnoughNVR: u64 = 3;
 
-public struct Stake has copy, drop, store {
+public struct Stake has drop, store {
     amount: u64,
+    locked_amount: u64,
     multiplier: u8,
 } 
 
@@ -76,6 +78,48 @@ public fun create_court(
     transfer::share_object(court);
 
     court_id
+}
+
+public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
+    let self = self.load_inner_mut();
+    let amount = assets.value();
+    assert!(amount >= self.min_stake, ENotEnoughNVR);
+
+    coin::put(&mut self.stake_pool, assets);
+    let sender = ctx.sender();
+
+    if (self.stakes.contains(sender)) {
+        let stake = self.stakes.borrow_mut(sender);
+        stake.amount = stake.amount + amount;
+    } else {
+        self.stakes.push_back(sender, Stake {
+            amount,
+            locked_amount: 0,
+            multiplier: 1,
+        });
+    };
+}
+
+public fun withdraw(self: &mut Court, ctx: &mut TxContext): Coin<NVR> {
+    let self = self.load_inner_mut();
+    let sender = ctx.sender();
+    
+    if (self.stakes.contains(sender)) {
+        let stake = self.stakes.remove(sender);
+        let amount = stake.amount;
+
+        if (stake.locked_amount > 0) {
+            self.stakes.push_back(sender, Stake {
+                amount: 0,
+                locked_amount: stake.locked_amount,
+                multiplier: 1,
+            });
+        };
+
+        coin::take(&mut self.stake_pool, amount, ctx)
+    } else {
+        coin::zero<NVR>(ctx)
+    }
 }
 
 entry fun update_treasury_address(self: &mut Court, court_registry: &CourtRegistry, _cap: &NivraAdminCap) {
