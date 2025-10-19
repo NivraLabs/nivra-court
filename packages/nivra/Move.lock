@@ -2,13 +2,14 @@
 
 [move]
 version = 3
-manifest_digest = "BF953EDC1297A1CB1C08BB65E8D53268D0C7098D8871B1483164434BB61CDFA4"
-deps_digest = "397E6A9F7A624706DBDFEE056CE88391A15876868FD18A88504DA74EB458D697"
+manifest_digest = "3C30D6C962F8A4A4FB42F628CE5FC56FCA7C7448886E3FC259850E50438A30C6"
+deps_digest = "52B406A7A21811BEF51751CF88DA0E76DAEFFEAC888D4F4060B1A72BBE7D8D35"
 dependencies = [
   { id = "Bridge", name = "Bridge" },
   { id = "MoveStdlib", name = "MoveStdlib" },
   { id = "Sui", name = "Sui" },
   { id = "SuiSystem", name = "SuiSystem" },
+  { id = "seal", name = "seal" },
   { id = "token", name = "token" },
 ]
 
@@ -40,6 +41,14 @@ source = { git = "https://github.com/MystenLabs/sui.git", rev = "db951a5ea6b125f
 
 dependencies = [
   { id = "MoveStdlib", name = "MoveStdlib" },
+  { id = "Sui", name = "Sui" },
+]
+
+[[move.package]]
+id = "seal"
+source = { git = "https://github.com/MystenLabs/seal.git", rev = "seal-v0.5.12", subdir = "move/seal" }
+
+dependencies = [
   { id = "Sui", name = "Sui" },
 ]
 

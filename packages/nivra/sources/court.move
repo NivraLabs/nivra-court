@@ -39,6 +39,9 @@ public struct CourtInner has store {
     stakes: LinkedTable<address, Stake>,
     fee_rate: u64,
     min_stake: u64,
+    default_evidence_period: u64,
+    default_voting_period: u64,
+    default_appeal_period: u64,
 }
 
 public fun create_court(
@@ -49,6 +52,9 @@ public fun create_court(
     skills: vector<String>,
     min_stake: u64,
     fee_rate: u64,
+    default_evidence_period: u64,
+    default_voting_period: u64,
+    default_appeal_period: u64,
     court_registry: &mut CourtRegistry,
     _cap: &NivraAdminCap,
     ctx: &mut TxContext,
@@ -59,7 +65,10 @@ public fun create_court(
         stake_pool: balance::zero<NVR>(),
         stakes: linked_table::new(ctx),
         fee_rate, 
-        min_stake, 
+        min_stake,
+        default_evidence_period,
+        default_voting_period,
+        default_appeal_period,
     };
 
     let court = Court { 
