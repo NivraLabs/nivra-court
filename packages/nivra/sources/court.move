@@ -10,11 +10,17 @@ use sui::balance::{Self, Balance};
 use token::nvr::NVR;
 use sui::linked_table::{Self, LinkedTable};
 use sui::coin::{Self, Coin};
+use sui::clock::Clock;
+use nivra::dispute::{create_dispute, share_dispute};
+use sui::sui::SUI;
+use sui::table::{Self, Table};
 
 const EWrongVersion: u64 = 1;
 const ENotUpgrade: u64 = 2;
 const ENotEnoughNVR: u64 = 3;
 const ENotOperational: u64 = 4;
+const EInvalidFee: u64 = 5;
+const EExistingDispute: u64 = 6;
 
 public enum Status has copy, drop, store {
     Running,
@@ -25,7 +31,12 @@ public struct Stake has drop, store {
     amount: u64,
     locked_amount: u64,
     multiplier: u8,
-} 
+}
+
+public struct DisputeDetails has store {
+    dispute_id: ID,
+    reward: Balance<SUI>,
+}
 
 public struct Court has key {
     id: UID,
@@ -34,14 +45,15 @@ public struct Court has key {
 
 public struct CourtInner has store {
     status: Status,
+    cases: Table<ID, DisputeDetails>,
     treasury_address: address,
     stake_pool: Balance<NVR>,
     stakes: LinkedTable<address, Stake>,
     fee_rate: u64,
     min_stake: u64,
-    default_evidence_period: u64,
-    default_voting_period: u64,
-    default_appeal_period: u64,
+    default_evidence_period_ms: u64,
+    default_voting_period_ms: u64,
+    default_appeal_period_ms: u64,
 }
 
 public fun create_court(
@@ -52,23 +64,24 @@ public fun create_court(
     skills: vector<String>,
     min_stake: u64,
     fee_rate: u64,
-    default_evidence_period: u64,
-    default_voting_period: u64,
-    default_appeal_period: u64,
+    default_evidence_period_ms: u64,
+    default_voting_period_ms: u64,
+    default_appeal_period_ms: u64,
     court_registry: &mut CourtRegistry,
     _cap: &NivraAdminCap,
     ctx: &mut TxContext,
 ): ID {
     let court_inner = CourtInner {
         status: Status::Running,
+        cases: table::new(ctx),
         treasury_address: court_registry.treasury_address(),
         stake_pool: balance::zero<NVR>(),
         stakes: linked_table::new(ctx),
         fee_rate, 
         min_stake,
-        default_evidence_period,
-        default_voting_period,
-        default_appeal_period,
+        default_evidence_period_ms,
+        default_voting_period_ms,
+        default_appeal_period_ms,
     };
 
     let court = Court { 
@@ -95,6 +108,52 @@ public fun create_court(
     transfer::share_object(court);
 
     court_id
+}
+
+public fun open_dispute(
+    self: &mut Court,
+    fee: Coin<SUI>,
+    contract: ID,
+    parties: vector<address>,
+    options: vector<String>,
+    nivster_count: u8,
+    max_appeals: u8,
+    evidence_period_ms: &mut Option<u64>,
+    voting_period_ms: &mut Option<u64>,
+    appeal_period_ms: &mut Option<u64>,
+    key_servers: vector<address>,
+    public_keys: vector<vector<u8>>,
+    clock: &Clock, 
+    ctx: &mut TxContext
+) {
+    let self = self.load_inner_mut();
+
+    assert!(fee.value() == self.fee_rate * (nivster_count as u64), EInvalidFee);
+    assert!(!self.cases.contains(contract), EExistingDispute);
+
+    let voters = linked_table::new(ctx);
+
+    let dispute = create_dispute(
+        contract,
+        evidence_period_ms.extract_or!(self.default_evidence_period_ms), 
+        voting_period_ms.extract_or!(self.default_voting_period_ms), 
+        appeal_period_ms.extract_or!(self.default_appeal_period_ms), 
+        max_appeals, 
+        parties, 
+        voters, 
+        options, 
+        key_servers, 
+        public_keys, 
+        clock, 
+        ctx
+    );
+
+    self.cases.add(contract, DisputeDetails { 
+        dispute_id: object::id(&dispute), 
+        reward: fee.into_balance(),
+    });
+
+    share_dispute(dispute);
 }
 
 public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
