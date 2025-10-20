@@ -178,6 +178,7 @@ entry fun open_dispute(
     self: &mut Court,
     fee: Coin<SUI>,
     contract: ID,
+    description: String,
     parties: vector<address>,
     options: vector<String>,
     nivster_count: u8,
@@ -205,6 +206,7 @@ entry fun open_dispute(
 
     let dispute = create_dispute(
         contract,
+        description,
         evidence_period, 
         voting_period, 
         appeal_period, 
@@ -226,7 +228,7 @@ entry fun open_dispute(
     share_dispute(dispute, ctx);
 }
 
-public (package) fun draw_nivsters(
+public(package) fun draw_nivsters(
     self: &mut CourtInner, 
     nivsters: &mut LinkedTable<address, VoterDetails>, 
     nivster_count: u8,
