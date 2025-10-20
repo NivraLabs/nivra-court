@@ -1,7 +1,7 @@
 module nivra::dispute;
 
 use std::ascii::String;
-use sui::linked_table::LinkedTable;
+use sui::linked_table::{Self, LinkedTable};
 use sui::clock::Clock;
 use seal::bf_hmac_encryption::{
     EncryptedObject,
@@ -13,10 +13,17 @@ public struct PartyCap has key, store {
     party: address,
 }
 
+public struct VoterCap has key, store {
+    id: UID,
+    dispute_id: ID,
+    voter: address,
+}
+
 public struct VoterDetails has copy, drop, store {
     stake: u64,
     vote: Option<EncryptedObject>,
     multiplier: u64,
+    cap_issued: bool,
 }
 
 public struct TimeTable has copy, drop, store {
@@ -44,6 +51,7 @@ public(package) fun create_voter_details(stake: u64): VoterDetails {
         stake,
         vote: std::option::none(),
         multiplier: 1,
+        cap_issued: false,
     }
 }
 
@@ -88,6 +96,26 @@ public(package) fun create_dispute(
     }
 }
 
+public(package) fun distribute_voter_caps(dispute: &mut Dispute, ctx: &mut TxContext) {
+    let mut i = linked_table::front(&dispute.voters);
+
+    while(i.is_some()) {
+        let k = *i.borrow();
+        let v = dispute.voters.borrow_mut(k);
+
+        if (!v.cap_issued) {
+            v.cap_issued = true;
+            transfer::public_transfer(VoterCap {
+                id: object::new(ctx),
+                dispute_id: object::id(dispute),
+                voter: k,
+            }, k);
+        };
+
+        i = dispute.voters.next(k);
+    };
+}
+
 public(package) fun share_dispute(dispute: Dispute, ctx: &mut TxContext) {
     dispute.parties.do_ref!(|party| {
         transfer::public_transfer(PartyCap {
@@ -96,6 +124,9 @@ public(package) fun share_dispute(dispute: Dispute, ctx: &mut TxContext) {
             party: *party,
         }, *party)
     });
+
+    let mut dispute = dispute;
+    distribute_voter_caps(&mut dispute, ctx);
 
     transfer::share_object(dispute);
 }
