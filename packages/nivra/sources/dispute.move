@@ -10,6 +10,7 @@ use seal::bf_hmac_encryption::{
 public struct VoterDetails has copy, drop, store {
     stake: u64,
     vote: Option<EncryptedObject>,
+    multiplier: u64,
 }
 
 public struct TimeTable has copy, drop, store {
@@ -36,7 +37,16 @@ public(package) fun create_voter_details(stake: u64): VoterDetails {
     VoterDetails {
         stake,
         vote: std::option::none(),
+        multiplier: 1,
     }
+}
+
+public(package) fun increase_multiplier(self: &mut VoterDetails) {
+    self.multiplier = self.multiplier + 1;
+}
+
+public(package) fun increase_stake(self: &mut VoterDetails, stake: u64) {
+    self.stake = self.stake + stake;
 }
 
 public(package) fun create_dispute(
