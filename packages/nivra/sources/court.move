@@ -266,9 +266,11 @@ public (package) fun draw_nivsters(
             let k = *i.borrow();
             let v = self.stakes.borrow_mut(k);
 
-            amount_counter = amount_counter + v.amount;
+            if (v.amount >= self.min_stake) {
+                amount_counter = amount_counter + v.amount;
+            };
 
-            if (amount_counter >= next_nivster && v.amount >= self.min_stake) {
+            if (amount_counter >= next_nivster) {
                 if (nivsters.contains(k)) {
                     let nivster_details = nivsters.borrow_mut(k);
                     nivster_details.increase_stake(v.amount);
