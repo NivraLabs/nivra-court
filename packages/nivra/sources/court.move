@@ -197,14 +197,17 @@ entry fun open_dispute(
     assert!(fee.value() == self.fee_rate * (nivster_count as u64), EInvalidFee);
     assert!(!self.cases.contains(contract), EExistingDispute);
 
+    let evidence_period = *evidence_period_ms.or!(option::some(self.default_evidence_period_ms)).borrow();
+    let voting_period = *voting_period_ms.or!(option::some(self.default_voting_period_ms)).borrow();
+    let appeal_period = *appeal_period_ms.or!(option::some(self.default_appeal_period_ms)).borrow();
     let mut nivsters = linked_table::new(ctx);
     draw_nivsters(self, &mut nivsters, nivster_count, r, ctx);
 
     let dispute = create_dispute(
         contract,
-        0, 
-        0, 
-        0, 
+        evidence_period, 
+        voting_period, 
+        appeal_period, 
         max_appeals, 
         parties, 
         nivsters, 
