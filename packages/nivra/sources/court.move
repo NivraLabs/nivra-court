@@ -223,7 +223,7 @@ entry fun open_dispute(
         reward: fee.into_balance(),
     });
 
-    share_dispute(dispute);
+    share_dispute(dispute, ctx);
 }
 
 public (package) fun draw_nivsters(

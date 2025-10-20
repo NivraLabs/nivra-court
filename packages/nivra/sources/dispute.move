@@ -7,6 +7,12 @@ use seal::bf_hmac_encryption::{
     EncryptedObject,
 };
 
+public struct PartyCap has key, store {
+    id: UID,
+    dispute_id: ID,
+    party: address,
+}
+
 public struct VoterDetails has copy, drop, store {
     stake: u64,
     vote: Option<EncryptedObject>,
@@ -82,6 +88,14 @@ public(package) fun create_dispute(
     }
 }
 
-public(package) fun share_dispute(dispute: Dispute) {
+public(package) fun share_dispute(dispute: Dispute, ctx: &mut TxContext) {
+    dispute.parties.do_ref!(|party| {
+        transfer::public_transfer(PartyCap {
+            id: object::new(ctx),
+            dispute_id: object::id(&dispute),
+            party: *party,
+        }, *party)
+    });
+
     transfer::share_object(dispute);
 }
