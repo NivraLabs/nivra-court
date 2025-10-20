@@ -1,0 +1,8 @@
+[package]
+name = "contract_kit"
+edition = "2024.beta"
+
+[dependencies]
+
+[addresses]
+contract_kit = "0x0"
