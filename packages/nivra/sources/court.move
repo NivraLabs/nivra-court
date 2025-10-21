@@ -176,7 +176,7 @@ entry fun migrate(self: &mut Court, _cap: &NivraAdminCap) {
 
 #[allow(lint(public_random))]
 public fun open_dispute(
-    self: &mut Court,
+    court: &mut Court,
     fee: Coin<SUI>,
     contract: ID,
     description: String,
@@ -193,7 +193,8 @@ public fun open_dispute(
     clock: &Clock, 
     ctx: &mut TxContext
 ) {
-    let self = self.load_inner_mut();
+    let court_id = object::id(court);
+    let self = court.load_inner_mut();
 
     assert!(self.status == Status::Running, ENotOperational);
     assert!(fee.value() == self.fee_rate * (nivster_count as u64), EInvalidFee);
@@ -207,6 +208,7 @@ public fun open_dispute(
 
     let dispute = create_dispute(
         contract,
+        court_id,
         description,
         evidence_period, 
         voting_period, 

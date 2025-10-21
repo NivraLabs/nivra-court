@@ -36,6 +36,7 @@ public struct TimeTable has copy, drop, store {
 public struct Dispute has key {
     id: UID,
     contract: ID,
+    court: ID,
     description: String,
     round: u16,
     timetable: TimeTable,
@@ -66,6 +67,7 @@ public(package) fun increase_stake(self: &mut VoterDetails, stake: u64) {
 
 public(package) fun create_dispute(
     contract: ID,
+    court: ID,
     description: String,
     evidence_period_ms: u64,
     voting_period_ms: u64,
@@ -82,6 +84,7 @@ public(package) fun create_dispute(
     Dispute {
         id: object::new(ctx),
         contract,
+        court,
         description,
         round: 1,
         timetable: TimeTable {
