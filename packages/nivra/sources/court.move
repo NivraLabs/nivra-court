@@ -174,7 +174,8 @@ entry fun migrate(self: &mut Court, _cap: &NivraAdminCap) {
     self.inner.upgrade(current_version(), inner, cap);
 }
 
-entry fun open_dispute(
+#[allow(lint(public_random))]
+public fun open_dispute(
     self: &mut Court,
     fee: Coin<SUI>,
     contract: ID,
