@@ -26,6 +26,7 @@ const ENotOperational: u64 = 4;
 const EInvalidFee: u64 = 5;
 const EExistingDispute: u64 = 6;
 const ENotEnoughNivsters: u64 = 7;
+const ENoNivsters: u64 = 8;
 
 public enum Status has copy, drop, store {
     Running,
@@ -199,12 +200,13 @@ public fun open_dispute(
     assert!(self.status == Status::Running, ENotOperational);
     assert!(fee.value() == self.fee_rate * (nivster_count as u64), EInvalidFee);
     assert!(!self.cases.contains(contract), EExistingDispute);
+    assert!(nivster_count > 0, ENoNivsters);
 
     let evidence_period = *evidence_period_ms.or!(option::some(self.default_evidence_period_ms)).borrow();
     let voting_period = *voting_period_ms.or!(option::some(self.default_voting_period_ms)).borrow();
     let appeal_period = *appeal_period_ms.or!(option::some(self.default_appeal_period_ms)).borrow();
     let mut nivsters = linked_table::new(ctx);
-    draw_nivsters(self, &mut nivsters, nivster_count, r, ctx);
+    draw_nivsters(self, &mut nivsters, nivster_count as u64, r, ctx);
 
     let dispute = create_dispute(
         contract,
@@ -234,7 +236,7 @@ public fun open_dispute(
 public(package) fun draw_nivsters(
     self: &mut CourtInner, 
     nivsters: &mut LinkedTable<address, VoterDetails>, 
-    nivster_count: u8,
+    nivster_count: u64,
     r: &Random,
     ctx: &mut TxContext,
 ) {
@@ -254,7 +256,7 @@ public(package) fun draw_nivsters(
         i = self.stakes.next(k);
     };
 
-    assert!(potential_nivsters >= nivster_count as u64, ENotEnoughNivsters);
+    assert!(potential_nivsters >= nivster_count, ENotEnoughNivsters);
 
     let mut j = 0;
     let mut generator = new_generator(r, ctx);
