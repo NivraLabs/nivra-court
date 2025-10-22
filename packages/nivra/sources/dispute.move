@@ -29,6 +29,7 @@ const ENotVoter: u64 = 7;
 const EVotingPeriodNotEnded: u64 = 8;
 const ENotEnoughKeys: u64 = 9;
 const EAlreadyFinalized: u64 = 10;
+const EInvalidDispute: u64 = 11;
 
 public struct PartyCap has key, store {
     id: UID,
@@ -243,6 +244,15 @@ public fun remove_evidence(
     assert!(i.is_some(), ENoEvidenceFound);
 
     evidence_envelope.evidence.swap_remove(*i.borrow()).destruct_evidence();
+}
+
+entry fun seal_approve(id: vector<u8>, dispute: &Dispute, clock: &Clock) {
+    let voting_period_end = dispute.timetable.round_init_ms + dispute.timetable.evidence_period_ms
+        + dispute.timetable.voting_period_ms;
+    let current_time = clock.timestamp_ms();
+
+    assert!(current_time > voting_period_end, EVotingPeriodNotEnded);
+    assert!(id == object::id(dispute).to_bytes(), EInvalidDispute);
 }
 
 public(package) fun create_voter_details(stake: u64): VoterDetails {
