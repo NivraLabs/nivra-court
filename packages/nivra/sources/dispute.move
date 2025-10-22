@@ -262,6 +262,14 @@ entry fun seal_approve(id: vector<u8>, dispute: &Dispute, clock: &Clock) {
     assert!(id == object::id(dispute).to_bytes(), EInvalidDispute);
 }
 
+public(package) fun get_options(dispute: &Dispute): vector<String> {
+    dispute.options
+}
+
+public(package) fun get_parties(dispute: &Dispute): vector<address> {
+    dispute.parties
+}
+
 public(package) fun get_voters_mut(dispute: &mut Dispute): &mut LinkedTable<address, VoterDetails> {
     &mut dispute.voters
 }

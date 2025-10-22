@@ -23,6 +23,7 @@ use nivra::constants::dispute_status_tie;
 use nivra::constants::dispute_status_canceled;
 use nivra::constants::dispute_status_active;
 use nivra::constants::dispute_status_completed;
+use nivra::result::create_result;
 
 const EWrongVersion: u64 = 1;
 const ENotUpgrade: u64 = 2;
@@ -268,6 +269,17 @@ public fun distribute_rewards(
     reward.destroy_zero();
 
     transfer::public_transfer(remaining_balance, court.treasury_address);
+
+    dispute.get_parties().do_ref!(|party| {
+        transfer::public_transfer(create_result(
+            object::id(dispute), 
+            dispute.get_contract_id(), 
+            dispute.get_options(), 
+            dispute.get_results(), 
+            winner_option, 
+            ctx
+            ), *party)
+    });
 
     dispute.set_status(dispute_status_completed());
 }
