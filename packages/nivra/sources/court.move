@@ -34,6 +34,8 @@ const EDisputeNotTie: u64 = 9;
 const EDisputeNotCompleted: u64 = 10;
 const EDisputeCompleted: u64 = 11;
 const ENotEnoughOptions: u64 = 12;
+const ENotAppealPeriod: u64 = 13;
+const ENoAppealsLeft: u64 = 14;
 
 public enum Status has copy, drop, store {
     Running,
@@ -180,6 +182,31 @@ entry fun migrate(self: &mut Court, _cap: &NivraAdminCap) {
     assert!(self.inner.version() < current_version(), ENotUpgrade);
     let (inner, cap) = self.inner.remove_value_for_upgrade<CourtInner>();
     self.inner.upgrade(current_version(), inner, cap);
+}
+
+#[allow(lint(public_random))]
+public fun open_appeal(
+    court: &mut Court,
+    dispute: &mut Dispute,
+    fee: Coin<SUI>,
+    clock: &Clock,
+    r: &Random,
+    ctx: &mut TxContext,
+) {
+    assert!(dispute.has_appeals_left(), ENoAppealsLeft);
+    assert!(dispute.is_appeal_period(clock), ENotAppealPeriod);
+
+    let court = court.load_inner_mut();
+    let nivster_count = dispute.get_nivster_count();
+
+    assert!(fee.value() == court.fee_rate * nivster_count, EInvalidFee);
+
+    let case = court.cases.borrow_mut(dispute.get_contract_id());
+    case.reward.join(fee.into_balance());
+
+    court.draw_nivsters(dispute.get_voters_mut(), nivster_count, r, ctx);
+    dispute.increase_appeals();
+    dispute.start_new_round(clock, ctx);
 }
 
 #[allow(lint(public_random))]

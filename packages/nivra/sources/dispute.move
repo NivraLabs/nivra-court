@@ -282,12 +282,33 @@ public(package) fun set_status(dispute: &mut Dispute, status: u64) {
     dispute.status = status;
 }
 
+public(package) fun get_nivster_count(dispute: &Dispute): u64 {
+    dispute.voters.length()
+}
+
+public(package) fun increase_appeals(dispute: &mut Dispute) {
+    dispute.appeals_used = dispute.appeals_used + 1;
+}
+
+public(package) fun has_appeals_left(dispute: &Dispute): bool {
+    dispute.appeals_used < dispute.max_appeals
+}
+
 public(package) fun is_completed(dispute: &Dispute, clock: &Clock): bool {
     let appeal_period_end = dispute.timetable.round_init_ms + dispute.timetable.evidence_period_ms
         + dispute.timetable.voting_period_ms + dispute.timetable.evidence_period_ms;
     let current_time = clock.timestamp_ms();
 
     current_time > appeal_period_end
+}
+
+public(package) fun is_appeal_period(dispute: &Dispute, clock: &Clock): bool {
+    let appeal_period_start = dispute.timetable.round_init_ms + dispute.timetable.evidence_period_ms
+        + dispute.timetable.voting_period_ms;
+    let appeal_period_end = appeal_period_start + dispute.timetable.evidence_period_ms;
+    let current_time = clock.timestamp_ms();
+
+    current_time >= appeal_period_start && current_time < appeal_period_end
 }
 
 public(package) fun create_voter_details(stake: u64): VoterDetails {
