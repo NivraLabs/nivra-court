@@ -33,6 +33,7 @@ const ENoNivsters: u64 = 8;
 const EDisputeNotTie: u64 = 9;
 const EDisputeNotCompleted: u64 = 10;
 const EDisputeCompleted: u64 = 11;
+const ENotEnoughOptions: u64 = 12;
 
 public enum Status has copy, drop, store {
     Running,
@@ -261,6 +262,7 @@ public fun open_dispute(
     assert!(fee.value() == self.fee_rate * (nivster_count as u64), EInvalidFee);
     assert!(!self.cases.contains(contract), EExistingDispute);
     assert!(nivster_count > 0, ENoNivsters);
+    assert!(options.length() >= 2, ENotEnoughOptions);
 
     let evidence_period = *evidence_period_ms.or!(option::some(self.default_evidence_period_ms)).borrow();
     let voting_period = *voting_period_ms.or!(option::some(self.default_voting_period_ms)).borrow();
