@@ -18,6 +18,9 @@ use sui::table::{Self, Table};
 use sui::random::Random;
 use sui::linked_table::borrow_mut;
 use sui::random::new_generator;
+use nivra::dispute::Dispute;
+use nivra::constants::dispute_status_tie;
+use nivra::constants::dispute_status_canceled;
 
 const EWrongVersion: u64 = 1;
 const ENotUpgrade: u64 = 2;
@@ -27,6 +30,9 @@ const EInvalidFee: u64 = 5;
 const EExistingDispute: u64 = 6;
 const ENotEnoughNivsters: u64 = 7;
 const ENoNivsters: u64 = 8;
+const EDisputeNotTie: u64 = 9;
+const EDisputeNotCompleted: u64 = 10;
+const EDisputeCompleted: u64 = 11;
 
 public enum Status has copy, drop, store {
     Running,
@@ -176,6 +182,59 @@ entry fun migrate(self: &mut Court, _cap: &NivraAdminCap) {
 }
 
 #[allow(lint(public_random))]
+public fun handle_dispute_tie(
+    court: &mut Court,
+    dispute: &mut Dispute,
+    clock: &Clock,
+    r: &Random,
+    ctx: &mut TxContext,
+) {
+    assert!(dispute.get_status() == dispute_status_tie(), EDisputeNotTie);
+    assert!(!dispute.is_completed(clock), EDisputeCompleted);
+
+    let court = court.load_inner_mut();
+    court.draw_nivsters(dispute.get_voters_mut(), 1, r, ctx);
+    dispute.start_new_round(clock, ctx);
+}
+
+public fun cancel_dispute(
+    court: &mut Court,
+    dispute: &mut Dispute,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    assert!(dispute.get_status() == dispute_status_tie(), EDisputeNotTie);
+    assert!(dispute.is_completed(clock), EDisputeNotCompleted);
+    dispute.set_status(dispute_status_canceled());
+
+    let court = court.load_inner_mut();
+    let mut case = court.cases.remove(dispute.get_contract_id());
+
+    let coin = case.reward.withdraw_all().into_coin(ctx);
+    transfer::public_transfer(coin, dispute.get_initiator());
+
+    let DisputeDetails { 
+        dispute_id: _, 
+        reward,
+    } = case;
+    reward.destroy_zero();
+
+    let voters = dispute.get_voters();
+    let mut i = linked_table::front(voters);
+
+    while(i.is_some()) {
+        let k = *i.borrow();
+        let v = voters.borrow(k);
+        let stake = court.stakes.borrow_mut(k);
+
+        stake.locked_amount = stake.locked_amount - v.getStake();
+        stake.amount = stake.amount + v.getStake();
+
+        i = voters.next(k);
+    };
+}
+
+#[allow(lint(public_random))]
 public fun open_dispute(
     court: &mut Court,
     fee: Coin<SUI>,
@@ -210,6 +269,7 @@ public fun open_dispute(
     draw_nivsters(self, &mut nivsters, nivster_count as u64, r, ctx);
 
     let dispute = create_dispute(
+        ctx.sender(),
         contract,
         court_id,
         description,

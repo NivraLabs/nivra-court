@@ -18,6 +18,8 @@ use nivra::evidence::Evidence;
 use nivra::evidence::create_evidence;
 use nivra::constants::max_evidence_limit;
 use sui::bls12381::g1_from_bytes;
+use nivra::constants::dispute_status_active;
+use nivra::constants::dispute_status_tie;
 
 const EEvidenceFull: u64 = 1;
 const ENotPartyMember: u64 = 2;
@@ -64,17 +66,21 @@ public struct EvidenceEnvelope has store {
 
 public struct Dispute has key {
     id: UID,
+    status: u64,
+    initiator: address,
     contract: ID,
     court: ID,
     description: String,
     round: u16,
     timetable: TimeTable,
     max_appeals: u8,
+    appeals_used: u8,
     parties: vector<address>,
     evidence: VecMap<address, EvidenceEnvelope>,
     voters: LinkedTable<address, VoterDetails>,
     options: vector<String>,
     result: vector<u64>,
+    winner_option: Option<u8>,
     key_servers: vector<address>,
     public_keys: vector<vector<u8>>,
     threshold: u8,
@@ -130,6 +136,7 @@ public fun finalize_vote(
     };
 
     dispute.result = result;
+    tally_votes(dispute);
 }
 
 public fun cast_vote(
@@ -255,6 +262,34 @@ entry fun seal_approve(id: vector<u8>, dispute: &Dispute, clock: &Clock) {
     assert!(id == object::id(dispute).to_bytes(), EInvalidDispute);
 }
 
+public(package) fun get_voters_mut(dispute: &mut Dispute): &mut LinkedTable<address, VoterDetails> {
+    &mut dispute.voters
+}
+
+public(package) fun get_voters(dispute: &Dispute): &LinkedTable<address, VoterDetails> {
+    &dispute.voters
+}
+
+public(package) fun get_initiator(dispute: &Dispute): address {
+    dispute.initiator
+}
+
+public(package) fun get_contract_id(dispute: &Dispute): ID {
+    dispute.contract
+}
+
+public(package) fun set_status(dispute: &mut Dispute, status: u64) {
+    dispute.status = status;
+}
+
+public(package) fun is_completed(dispute: &Dispute, clock: &Clock): bool {
+    let appeal_period_end = dispute.timetable.round_init_ms + dispute.timetable.evidence_period_ms
+        + dispute.timetable.voting_period_ms + dispute.timetable.evidence_period_ms;
+    let current_time = clock.timestamp_ms();
+
+    current_time > appeal_period_end
+}
+
 public(package) fun create_voter_details(stake: u64): VoterDetails {
     VoterDetails {
         stake,
@@ -263,6 +298,14 @@ public(package) fun create_voter_details(stake: u64): VoterDetails {
         multiplier: 1,
         cap_issued: false,
     }
+}
+
+public(package) fun get_status(self: &Dispute): u64 {
+    self.status
+}
+
+public(package) fun getStake(self: &VoterDetails): u64 {
+    self.stake
 }
 
 public(package) fun increase_multiplier(self: &mut VoterDetails) {
@@ -274,6 +317,7 @@ public(package) fun increase_stake(self: &mut VoterDetails, stake: u64) {
 }
 
 public(package) fun create_dispute(
+    initiator: address,
     contract: ID,
     court: ID,
     description: String,
@@ -292,6 +336,8 @@ public(package) fun create_dispute(
 ): Dispute {
     Dispute {
         id: object::new(ctx),
+        status: dispute_status_active(),
+        initiator,
         contract,
         court,
         description,
@@ -303,15 +349,38 @@ public(package) fun create_dispute(
             appeal_period_ms,
         },
         max_appeals,
+        appeals_used: 0,
         parties,
         evidence: vec_map::empty(),
         voters,
         options,
         result: vector[],
+        winner_option: option::none(),
         key_servers,
         public_keys,
         threshold,
     }
+}
+
+public(package) fun start_new_round(dispute: &mut Dispute, clock: &Clock, ctx: &mut TxContext) {
+    distribute_voter_caps(dispute, ctx);
+
+    dispute.round = dispute.round + 1;
+    dispute.timetable.round_init_ms = clock.timestamp_ms();
+    dispute.result = vector[];
+    dispute.winner_option = option::none();
+
+    let mut i = linked_table::front(&dispute.voters);
+
+    while(i.is_some()) {
+        let k = *i.borrow();
+        let v = dispute.voters.borrow_mut(k);
+
+        v.vote = option::none();
+        v.decrypted_vote = option::none();
+
+        i = dispute.voters.next(k);
+    };
 }
 
 public(package) fun distribute_voter_caps(dispute: &mut Dispute, ctx: &mut TxContext) {
@@ -347,4 +416,22 @@ public(package) fun share_dispute(dispute: Dispute, ctx: &mut TxContext) {
     distribute_voter_caps(&mut dispute, ctx);
 
     transfer::share_object(dispute);
+}
+
+public(package) fun tally_votes(dispute: &mut Dispute) {
+    let mut highest = 0;
+    let mut second_highest = 0;
+
+    dispute.result.do_ref!(|option_votes| {
+        if (*option_votes >= highest) {
+            second_highest = highest;
+            highest = *option_votes;
+        };
+    });
+
+    if (second_highest == highest) {
+        dispute.status = dispute_status_tie();
+    } else {
+        dispute.winner_option = dispute.result.find_index!(|res| res == highest).map!(|res| res as u8);
+    };
 }
