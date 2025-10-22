@@ -6,12 +6,18 @@ use sui::clock::Clock;
 use seal::bf_hmac_encryption::{
     EncryptedObject,
     parse_encrypted_object,
+    VerifiedDerivedKey,
+    verify_derived_keys,
+    new_public_key,
+    PublicKey,
+    decrypt
 };
 use sui::vec_map;
 use sui::vec_map::VecMap;
 use nivra::evidence::Evidence;
 use nivra::evidence::create_evidence;
 use nivra::constants::max_evidence_limit;
+use sui::bls12381::g1_from_bytes;
 
 const EEvidenceFull: u64 = 1;
 const ENotPartyMember: u64 = 2;
@@ -20,6 +26,9 @@ const ENotEvidencePeriod: u64 = 4;
 const EInvalidVote: u64 = 5;
 const ENotVotingPeriod: u64 = 6;
 const ENotVoter: u64 = 7;
+const EVotingPeriodNotEnded: u64 = 8;
+const ENotEnoughKeys: u64 = 9;
+const EAlreadyFinalized: u64 = 10;
 
 public struct PartyCap has key, store {
     id: UID,
@@ -64,9 +73,62 @@ public struct Dispute has key {
     evidence: VecMap<address, EvidenceEnvelope>,
     voters: LinkedTable<address, VoterDetails>,
     options: vector<String>,
+    result: vector<u64>,
     key_servers: vector<address>,
     public_keys: vector<vector<u8>>,
     threshold: u8,
+}
+
+public fun finalize_vote(
+    dispute: &mut Dispute,
+    derived_keys: &vector<vector<u8>>,
+    key_servers: &vector<address>,
+    clock: &Clock,
+) {
+    let voting_period_end = dispute.timetable.round_init_ms + dispute.timetable.evidence_period_ms
+        + dispute.timetable.voting_period_ms;
+    let current_time = clock.timestamp_ms();
+
+    assert!(current_time > voting_period_end, EVotingPeriodNotEnded);
+    assert!(key_servers.length() == derived_keys.length());
+    assert!(derived_keys.length() as u8 >= dispute.threshold, ENotEnoughKeys);
+    assert!(dispute.result.length() == 0, EAlreadyFinalized);
+
+    let verified_derived_keys: vector<VerifiedDerivedKey> = verify_derived_keys(
+        &derived_keys.map_ref!(|k| g1_from_bytes(k)), 
+        @nivra, 
+        object::id(dispute).to_bytes(), 
+        &key_servers
+            .map_ref!(|ks1| dispute.key_servers.find_index!(|ks2| ks1 == ks2).destroy_some())
+            .map!(|i| new_public_key(dispute.key_servers[i].to_id(), dispute.public_keys[i])),
+    );
+
+    let all_public_keys: vector<PublicKey> = dispute
+        .key_servers
+        .zip_map!(dispute.public_keys, |ks, pk| new_public_key(ks.to_id(), pk));
+    
+    let mut result = vector::tabulate!(dispute.options.length(), |_| 0);
+    let mut i = linked_table::front(&dispute.voters);
+
+    while(i.is_some()) {
+        let k = *i.borrow();
+        let v = dispute.voters.borrow_mut(k);
+
+        v.vote.do_ref!(|vote| {
+            decrypt(vote, &verified_derived_keys, &all_public_keys)
+            .do_ref!(|decrypted| {
+                if (decrypted.length() == 1 && decrypted[0] as u64 < dispute.options.length()) {
+                    let option = decrypted[0];
+                    v.decrypted_vote = option::some(option);
+                    *&mut result[option as u64] = result[option as u64] + 1;
+                }
+            });
+        });
+
+        i = dispute.voters.next(k);
+    };
+
+    dispute.result = result;
 }
 
 public fun cast_vote(
@@ -235,6 +297,7 @@ public(package) fun create_dispute(
         evidence: vec_map::empty(),
         voters,
         options,
+        result: vector[],
         key_servers,
         public_keys,
         threshold,
