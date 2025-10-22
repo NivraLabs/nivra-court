@@ -190,6 +190,7 @@ public fun open_dispute(
     appeal_period_ms: Option<u64>,
     key_servers: vector<address>,
     public_keys: vector<vector<u8>>,
+    threshold: u8,
     r: &Random,
     clock: &Clock, 
     ctx: &mut TxContext
@@ -221,6 +222,7 @@ public fun open_dispute(
         options, 
         key_servers, 
         public_keys, 
+        threshold,
         clock, 
         ctx
     );
