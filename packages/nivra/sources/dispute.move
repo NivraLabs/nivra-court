@@ -127,7 +127,7 @@ public fun finalize_vote(
                 if (decrypted.length() == 1 && decrypted[0] as u64 < dispute.options.length()) {
                     let option = decrypted[0];
                     v.decrypted_vote = option::some(option);
-                    *&mut result[option as u64] = result[option as u64] + 1;
+                    *&mut result[option as u64] = result[option as u64] + (1 * v.multiplier);
                 }
             });
         });
@@ -286,6 +286,14 @@ public(package) fun get_nivster_count(dispute: &Dispute): u64 {
     dispute.voters.length()
 }
 
+public(package) fun get_winner_option(dispute: &Dispute): Option<u8> {
+    dispute.winner_option
+}
+
+public(package) fun get_results(dispute: &Dispute): vector<u64> {
+    dispute.result
+}
+
 public(package) fun increase_appeals(dispute: &mut Dispute) {
     dispute.appeals_used = dispute.appeals_used + 1;
 }
@@ -323,6 +331,14 @@ public(package) fun create_voter_details(stake: u64): VoterDetails {
 
 public(package) fun get_status(self: &Dispute): u64 {
     self.status
+}
+
+public(package) fun get_multiplier(self: &VoterDetails): u64 {
+    self.multiplier
+}
+
+public(package) fun get_decrypted_vote(self: &VoterDetails): Option<u8> {
+    self.decrypted_vote
 }
 
 public(package) fun getStake(self: &VoterDetails): u64 {
