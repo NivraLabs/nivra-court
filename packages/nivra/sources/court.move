@@ -236,7 +236,7 @@ public fun distribute_rewards(
         .to_int();
     let standard_sui_reward = std::u64::divide_and_round_up((court.fee_rate * 99), 100);
     let mut case = court.cases.remove(dispute.get_contract_id());
-    let sui_reward = if (standard_sui_reward > std::u64::divide_and_round_up(case.reward.value(), majority_count)) {
+    let sui_reward = if (standard_sui_reward < std::u64::divide_and_round_up(case.reward.value(), majority_count)) {
         standard_sui_reward
     } else {
         std::uq64_64::from_int(case.reward.value())
