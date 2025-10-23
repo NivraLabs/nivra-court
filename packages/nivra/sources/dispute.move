@@ -311,6 +311,10 @@ public(package) fun has_appeals_left(dispute: &Dispute): bool {
     dispute.appeals_used < dispute.max_appeals
 }
 
+public(package) fun is_party_member(dispute: &Dispute, cap: &PartyCap): bool {
+    dispute.parties.find_index!(|party| *party == cap.party).is_some()
+}
+
 public(package) fun is_completed(dispute: &Dispute, clock: &Clock): bool {
     let appeal_period_end = dispute.timetable.round_init_ms + dispute.timetable.evidence_period_ms
         + dispute.timetable.voting_period_ms + dispute.timetable.evidence_period_ms;

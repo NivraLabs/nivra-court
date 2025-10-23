@@ -25,6 +25,7 @@ use nivra::constants::dispute_status_active;
 use nivra::constants::dispute_status_completed;
 use nivra::result::create_result;
 use nivra::constants::dispute_status_tallied;
+use nivra::dispute::PartyCap;
 
 const EWrongVersion: u64 = 1;
 const ENotUpgrade: u64 = 2;
@@ -42,6 +43,7 @@ const ENotAppealPeriod: u64 = 13;
 const ENoAppealsLeft: u64 = 14;
 const EDisputeNotTallied: u64 = 15;
 const EDisputeNotError: u64 = 16;
+const ENotPartyMember: u64 = 17;
 
 public enum Status has copy, drop, store {
     Running,
@@ -291,10 +293,12 @@ public fun open_appeal(
     court: &mut Court,
     dispute: &mut Dispute,
     fee: Coin<SUI>,
+    cap: &PartyCap,
     clock: &Clock,
     r: &Random,
     ctx: &mut TxContext,
 ) {
+    assert!(dispute.is_party_member(cap), ENotPartyMember);
     assert!(dispute.get_status() == dispute_status_tallied(), EDisputeNotTallied);
     assert!(dispute.has_appeals_left(), ENoAppealsLeft);
     assert!(dispute.is_appeal_period(clock), ENotAppealPeriod);
