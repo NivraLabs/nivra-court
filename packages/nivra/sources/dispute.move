@@ -20,6 +20,7 @@ use nivra::constants::max_evidence_limit;
 use sui::bls12381::g1_from_bytes;
 use nivra::constants::dispute_status_active;
 use nivra::constants::dispute_status_tie;
+use nivra::constants::dispute_status_tallied;
 
 const EEvidenceFull: u64 = 1;
 const ENotPartyMember: u64 = 2;
@@ -478,5 +479,6 @@ public(package) fun tally_votes(dispute: &mut Dispute) {
         dispute.status = dispute_status_tie();
     } else {
         dispute.winner_option = dispute.result.find_index!(|res| res == highest).map!(|res| res as u8);
+        dispute.status = dispute_status_tallied();
     };
 }

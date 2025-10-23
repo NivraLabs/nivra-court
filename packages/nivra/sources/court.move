@@ -24,6 +24,7 @@ use nivra::constants::dispute_status_canceled;
 use nivra::constants::dispute_status_active;
 use nivra::constants::dispute_status_completed;
 use nivra::result::create_result;
+use nivra::constants::dispute_status_tallied;
 
 const EWrongVersion: u64 = 1;
 const ENotUpgrade: u64 = 2;
@@ -39,7 +40,8 @@ const EDisputeCompleted: u64 = 11;
 const ENotEnoughOptions: u64 = 12;
 const ENotAppealPeriod: u64 = 13;
 const ENoAppealsLeft: u64 = 14;
-const EDisputeNotActive: u64 = 15;
+const EDisputeNotTallied: u64 = 15;
+const EDisputeNotError: u64 = 16;
 
 public enum Status has copy, drop, store {
     Running,
@@ -195,7 +197,7 @@ public fun distribute_rewards(
     ctx: &mut TxContext,
 ) {
     assert!(dispute.is_completed(clock), EDisputeNotCompleted);
-    assert!(dispute.get_status() == dispute_status_active(), EDisputeNotActive);
+    assert!(dispute.get_status() == dispute_status_tallied(), EDisputeNotTallied);
 
     let court = court.load_inner_mut();
     let winner_option = dispute.get_winner_option().destroy_some();
@@ -278,7 +280,7 @@ public fun distribute_rewards(
             dispute.get_results(), 
             winner_option, 
             ctx
-            ), *party)
+        ), *party)
     });
 
     dispute.set_status(dispute_status_completed());
@@ -331,7 +333,7 @@ public fun cancel_dispute(
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
-    assert!(dispute.get_status() == dispute_status_tie(), EDisputeNotTie);
+    assert!(dispute.get_status() == dispute_status_tie() || dispute.get_status() == dispute_status_active(), EDisputeNotError);
     assert!(dispute.is_completed(clock), EDisputeNotCompleted);
     dispute.set_status(dispute_status_canceled());
 
