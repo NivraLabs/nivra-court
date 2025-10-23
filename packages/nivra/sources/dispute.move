@@ -411,6 +411,7 @@ public(package) fun create_dispute(
 public(package) fun start_new_round(dispute: &mut Dispute, clock: &Clock, ctx: &mut TxContext) {
     distribute_voter_caps(dispute, ctx);
 
+    dispute.status = dispute_status_active();
     dispute.round = dispute.round + 1;
     dispute.timetable.round_init_ms = clock.timestamp_ms();
     dispute.result = vector[];

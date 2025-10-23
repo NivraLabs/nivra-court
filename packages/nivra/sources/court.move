@@ -295,6 +295,7 @@ public fun open_appeal(
     r: &Random,
     ctx: &mut TxContext,
 ) {
+    assert!(dispute.get_status() == dispute_status_tallied(), EDisputeNotTallied);
     assert!(dispute.has_appeals_left(), ENoAppealsLeft);
     assert!(dispute.is_appeal_period(clock), ENotAppealPeriod);
 
