@@ -89,6 +89,7 @@ public struct Dispute has key {
 
 public fun finalize_vote(
     dispute: &mut Dispute,
+    package_id: address,
     derived_keys: &vector<vector<u8>>,
     key_servers: &vector<address>,
     clock: &Clock,
@@ -104,7 +105,7 @@ public fun finalize_vote(
 
     let verified_derived_keys: vector<VerifiedDerivedKey> = verify_derived_keys(
         &derived_keys.map_ref!(|k| g1_from_bytes(k)), 
-        @nivra, 
+        package_id, 
         object::id(dispute).to_bytes(), 
         &key_servers
             .map_ref!(|ks1| dispute.key_servers.find_index!(|ks2| ks1 == ks2).destroy_some())
