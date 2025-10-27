@@ -1,31 +1,54 @@
+// © 2025 Nivra Labs Ltd.
+
+/// # Court Module
+///
+/// The `court` module defines and manages individual courts within the Nivra protocol.
+/// Courts handle staking, dispute creation, reward distribution, and appeals.
+/// 
+/// Each court maintains its own stake pool, disputes, and operational settings.
 module nivra::court;
 
-use sui::versioned::{Self, Versioned};
-use nivra::constants::current_version;
-use nivra::court_registry::NivraAdminCap;
+// === Imports ===
+
+use nivra::{
+    court_registry::{
+        CourtRegistry,
+        create_metadata,
+        NivraAdminCap,
+    },
+    constants::{
+        current_version, 
+        dispute_status_active, 
+        dispute_status_tie,
+        dispute_status_tallied,
+        dispute_status_canceled, 
+        dispute_status_completed,
+    },
+    dispute::{
+        Dispute,
+        VoterDetails,
+        PartyCap,
+        create_dispute, 
+        share_dispute, 
+        create_voter_details,
+    },
+    result::create_result,
+};
 use std::ascii::String;
-use nivra::court_registry::create_metadata;
-use nivra::court_registry::CourtRegistry;
-use nivra::dispute::VoterDetails;
-use sui::balance::{Self, Balance};
+use sui::{
+    versioned::{Self, Versioned},
+    balance::{Self, Balance},
+    coin::{Self, Coin},
+    linked_table::{Self, LinkedTable},
+    table::{Self, Table},
+    random::{Random, new_generator},
+    clock::Clock,
+    sui::SUI,
+    linked_table::borrow_mut,
+};
 use token::nvr::NVR;
-use sui::linked_table::{Self, LinkedTable};
-use sui::coin::{Self, Coin};
-use sui::clock::Clock;
-use nivra::dispute::{create_dispute, share_dispute, create_voter_details};
-use sui::sui::SUI;
-use sui::table::{Self, Table};
-use sui::random::Random;
-use sui::linked_table::borrow_mut;
-use sui::random::new_generator;
-use nivra::dispute::Dispute;
-use nivra::constants::dispute_status_tie;
-use nivra::constants::dispute_status_canceled;
-use nivra::constants::dispute_status_active;
-use nivra::constants::dispute_status_completed;
-use nivra::result::create_result;
-use nivra::constants::dispute_status_tallied;
-use nivra::dispute::PartyCap;
+
+// === Constants ===
 
 const EWrongVersion: u64 = 1;
 const ENotUpgrade: u64 = 2;
@@ -45,17 +68,36 @@ const EDisputeNotTallied: u64 = 15;
 const EDisputeNotError: u64 = 16;
 const ENotPartyMember: u64 = 17;
 
+// === Structs ===
+
+/// ## `Status`
+///
+/// Operational status of the court.
+///
+/// - `Running`: Court is active and can accept new disputes and stakes.
+/// - `Halted`: Court is paused by admin and operations are disabled.
 public enum Status has copy, drop, store {
     Running,
     Halted,
 }
 
+/// ## `Stake`
+///
+/// Represents a staker's balance within a court.
+///
+/// ### Fields
+/// - `amount`: Available stake.
+/// - `locked_amount`: Currently locked stake in disputes.
+/// - `multiplier`: Multiplier applied to amount when nivsters are drawn.
 public struct Stake has copy, drop, store {
     amount: u64,
     locked_amount: u64,
     multiplier: u8,
 }
 
+/// ## `DisputeDetails`
+///
+/// Internal record storing reference to a dispute and its reward pool.
 public struct DisputeDetails has store {
     dispute_id: ID,
     reward: Balance<SUI>,
@@ -66,10 +108,20 @@ public struct Court has key {
     inner: Versioned,
 }
 
+/// ## `CourtInner`
+/// 
+/// ### Fields
+/// - `status`: Court operational status.
+/// - `cases`: Table of disputes associated with this court.
+/// - `stake_pool`: Pool of staked NVR tokens.
+/// - `stakes`: Linked table mapping addresses to their `Stake`.
+/// - `fee_rate`: Dispute fee rate per nivster.
+/// - `min_stake`: Minimum stake requirement.
+/// - `default_*_period_ms`: Default durations for evidence, voting, and appeals.
 public struct CourtInner has store {
+    ai_court: bool,
     status: Status,
     cases: Table<ID, DisputeDetails>,
-    treasury_address: address,
     stake_pool: Balance<NVR>,
     stakes: LinkedTable<address, Stake>,
     fee_rate: u64,
@@ -79,60 +131,10 @@ public struct CourtInner has store {
     default_appeal_period_ms: u64,
 }
 
-public fun create_court(
-    category: String,
-    name: String,
-    icon: Option<String>,
-    description: String,
-    skills: vector<String>,
-    min_stake: u64,
-    fee_rate: u64,
-    default_evidence_period_ms: u64,
-    default_voting_period_ms: u64,
-    default_appeal_period_ms: u64,
-    court_registry: &mut CourtRegistry,
-    _cap: &NivraAdminCap,
-    ctx: &mut TxContext,
-): ID {
-    let court_inner = CourtInner {
-        status: Status::Running,
-        cases: table::new(ctx),
-        treasury_address: court_registry.treasury_address(),
-        stake_pool: balance::zero<NVR>(),
-        stakes: linked_table::new(ctx),
-        fee_rate, 
-        min_stake,
-        default_evidence_period_ms,
-        default_voting_period_ms,
-        default_appeal_period_ms,
-    };
+// === Public Functions ===
 
-    let court = Court { 
-        id: object::new(ctx), 
-        inner: versioned::create(
-            current_version(), 
-            court_inner, 
-            ctx
-        )
-    };
-
-    let court_id = object::id(&court);
-    let metadata = create_metadata(
-        category, 
-        name, 
-        icon, 
-        description, 
-        skills, 
-        min_stake, 
-        std::u64::divide_and_round_up((fee_rate * 99), 100),
-    );
-
-    court_registry.register_court(court_id, metadata);
-    transfer::share_object(court);
-
-    court_id
-}
-
+/// Stake NVR tokens in a court.
+/// (Regular stake option with multiplier = 1)
 public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
     let self = self.load_inner_mut();
     let amount = assets.value();
@@ -154,6 +156,7 @@ public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
     };
 }
 
+/// Withdraw available stake amount.
 public fun withdraw(self: &mut Court, ctx: &mut TxContext): Coin<NVR> {
     let self = self.load_inner_mut();
     let sender = ctx.sender();
@@ -175,26 +178,11 @@ public fun withdraw(self: &mut Court, ctx: &mut TxContext): Coin<NVR> {
     }
 }
 
-public fun halt_operation(self: &mut Court, _cap: &NivraAdminCap) {
-    let self = self.load_inner_mut();
-    self.status = Status::Halted;
-}
-
-entry fun update_treasury_address(self: &mut Court, court_registry: &CourtRegistry, _cap: &NivraAdminCap) {
-    let latest_treasury_address = court_registry.treasury_address();
-    let self = self.load_inner_mut();
-    self.treasury_address = latest_treasury_address;
-}
-
-entry fun migrate(self: &mut Court, _cap: &NivraAdminCap) {
-    assert!(self.inner.version() < current_version(), ENotUpgrade);
-    let (inner, cap) = self.inner.remove_value_for_upgrade<CourtInner>();
-    self.inner.upgrade(current_version(), inner, cap);
-}
-
+/// Distribute rewards to jurors after a dispute has been tallied and is in reward period.
 public fun distribute_rewards(
     court: &mut Court,
     dispute: &mut Dispute,
+    registry: &CourtRegistry,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
@@ -214,6 +202,7 @@ public fun distribute_rewards(
         let v = voters.borrow(k);
         let vote = v.get_decrypted_vote();
 
+        // Omitting vote results in 30% penalty.
         if (vote.is_none()) {
             let cut = std::u64::divide_and_round_up((v.getStake() * 30), 100);
             let stake = court.stakes.borrow_mut(k);
@@ -222,6 +211,7 @@ public fun distribute_rewards(
             nvr_cut = nvr_cut + cut;
         };
 
+        // Minority vote results in 25% penalty.
         if (vote.is_some() && *vote.borrow() != winner_option) {
             let cut = std::u64::divide_and_round_up((v.getStake() * 25), 100);
             let stake = court.stakes.borrow_mut(k);
@@ -272,7 +262,7 @@ public fun distribute_rewards(
     let remaining_balance = reward.withdraw_all().into_coin(ctx);
     reward.destroy_zero();
 
-    transfer::public_transfer(remaining_balance, court.treasury_address);
+    transfer::public_transfer(remaining_balance, registry.treasury_address());
 
     dispute.get_parties().do_ref!(|party| {
         transfer::public_transfer(create_result(
@@ -288,6 +278,7 @@ public fun distribute_rewards(
     dispute.set_status(dispute_status_completed());
 }
 
+/// Open an appeal for a tallied dispute in appeal period.
 #[allow(lint(public_random))]
 public fun open_appeal(
     court: &mut Court,
@@ -316,6 +307,7 @@ public fun open_appeal(
     dispute.start_new_round(clock, ctx);
 }
 
+/// Handle a tied dispute by assigning an additional juror.
 #[allow(lint(public_random))]
 public fun handle_dispute_tie(
     court: &mut Court,
@@ -332,6 +324,7 @@ public fun handle_dispute_tie(
     dispute.start_new_round(clock, ctx);
 }
 
+/// Cancel an active or tied dispute without result and refund participants.
 public fun cancel_dispute(
     court: &mut Court,
     dispute: &mut Dispute,
@@ -369,6 +362,25 @@ public fun cancel_dispute(
     };
 }
 
+/// Open a new dispute in the court.
+///
+/// ### Parameters
+/// - `court`: Mutable reference to the `Court`.
+/// - `fee`: SUI fee = nivster count * court fee rate.
+/// - `contract`: Associated contract ID.
+/// - `description`: Dispute description.
+/// - `parties`: List of involved addresses.
+/// - `options`: Voting options.
+/// - `nivster_count`: Number of jurors.
+/// - `max_appeals`: Maximum appeals.
+/// - `evidence_period_ms`: Optional custom evidence duration.
+/// - `voting_period_ms`: Optional custom voting duration.
+/// - `appeal_period_ms`: Optional custom appeal duration.
+/// - `key_servers`: Public key servers.
+/// - `public_keys`: Juror public keys.
+/// - `threshold`: Encryption key servers threshold.
+/// - `r`: Randomness source.
+/// - `clock`: Global clock.
 #[allow(lint(public_random))]
 public fun open_dispute(
     court: &mut Court,
@@ -431,6 +443,100 @@ public fun open_dispute(
     share_dispute(dispute, ctx);
 }
 
+// === Admin Functions ===
+
+/// Creates and registers a new court.
+///
+/// ### Parameters
+/// - `category`: Court category name.
+/// - `name`: Human-readable name of the court.
+/// - `icon`: Optional icon URL.
+/// - `description`: Court description.
+/// - `skills`: List of required skills.
+/// - `min_stake`: Minimum stake in NVR.
+/// - `fee_rate`: Dispute fee rate per nivster.
+/// - `default_evidence_period_ms`: Default evidence period (milliseconds).
+/// - `default_voting_period_ms`: Default voting period (milliseconds).
+/// - `default_appeal_period_ms`: Default appeal period (milliseconds).
+/// - `court_registry`: Court registry.
+/// - `_cap`: Nivra admin capability.
+///
+/// ### Returns
+/// - The `ID` of the newly created court.
+///
+/// ### Aborts
+/// - If registration in registry fails.
+public fun create_court(
+    ai_court: bool,
+    category: String,
+    name: String,
+    icon: Option<String>,
+    description: String,
+    skills: vector<String>,
+    min_stake: u64,
+    fee_rate: u64,
+    default_evidence_period_ms: u64,
+    default_voting_period_ms: u64,
+    default_appeal_period_ms: u64,
+    court_registry: &mut CourtRegistry,
+    _cap: &NivraAdminCap,
+    ctx: &mut TxContext,
+): ID {
+    let court_inner = CourtInner {
+        ai_court,
+        status: Status::Running,
+        cases: table::new(ctx),
+        stake_pool: balance::zero<NVR>(),
+        stakes: linked_table::new(ctx),
+        fee_rate, 
+        min_stake,
+        default_evidence_period_ms,
+        default_voting_period_ms,
+        default_appeal_period_ms,
+    };
+
+    let court = Court { 
+        id: object::new(ctx), 
+        inner: versioned::create(
+            current_version(), 
+            court_inner, 
+            ctx
+        )
+    };
+
+    let court_id = object::id(&court);
+    let metadata = create_metadata(
+        category, 
+        name, 
+        icon, 
+        description, 
+        skills, 
+        min_stake, 
+        std::u64::divide_and_round_up((fee_rate * 99), 100),
+    );
+
+    court_registry.register_court(court_id, metadata);
+    transfer::share_object(court);
+
+    court_id
+}
+
+/// Halt court operations.
+public fun halt_operation(self: &mut Court, _cap: &NivraAdminCap) {
+    let self = self.load_inner_mut();
+    self.status = Status::Halted;
+}
+
+/// Migrate the court to the latest package version.
+entry fun migrate(self: &mut Court, _cap: &NivraAdminCap) {
+    assert!(self.inner.version() < current_version(), ENotUpgrade);
+    let (inner, cap) = self.inner.remove_value_for_upgrade<CourtInner>();
+    self.inner.upgrade(current_version(), inner, cap);
+}
+
+// === Package Functions ===
+
+/// Randomly selects nivsters from the stake pool based on their stake amounts.
 public(package) fun draw_nivsters(
     self: &mut CourtInner, 
     nivsters: &mut LinkedTable<address, VoterDetails>, 
@@ -448,7 +554,7 @@ public(package) fun draw_nivsters(
 
         if (v.amount >= self.min_stake) {
             potential_nivsters = potential_nivsters + 1;
-            staked_amount = staked_amount + v.amount;
+            staked_amount = staked_amount + v.amount * (v.multiplier as u64);
         };
 
         i = self.stakes.next(k);
@@ -475,7 +581,7 @@ public(package) fun draw_nivsters(
             let v = self.stakes.borrow_mut(k);
 
             if (v.amount >= self.min_stake) {
-                amount_counter = amount_counter + v.amount;
+                amount_counter = amount_counter + v.amount * (v.multiplier as u64);
             };
 
             if (amount_counter >= next_nivster) {
@@ -487,7 +593,7 @@ public(package) fun draw_nivsters(
                     nivsters.push_back(k, create_voter_details(v.amount));
                 };
 
-                staked_amount = staked_amount - v.amount;
+                staked_amount = staked_amount - v.amount * (v.multiplier as u64);
                 v.locked_amount = v.locked_amount + v.amount;
                 v.amount = 0;
                 nivster_found = true;
@@ -498,11 +604,13 @@ public(package) fun draw_nivsters(
     };
 }
 
+/// Loads mutable reference to the inner court data.
 public(package) fun load_inner_mut(self: &mut Court): &mut CourtInner {
     assert!(self.inner.version() == current_version(), EWrongVersion);
     self.inner.load_value_mut()
 }
 
+/// Loads immutable reference to the inner court data.
 public(package) fun load_inner(self: &Court): &CourtInner {
     assert!(self.inner.version() == current_version(), EWrongVersion);
     self.inner.load_value()
