@@ -1,51 +1,82 @@
 module nivra::evidence;
 
 use std::ascii::String;
+use nivra::dispute::Dispute;
+use nivra::dispute::PartyCap;
+use sui::clock::Clock;
+use nivra::dispute::remove_evidence;
+
+const EInvalidPartyCap: u64 = 1;
 
 public struct Evidence has key, store {
     id: UID,
+    party_cap_id: ID,
     description: String,
     blob_id: Option<String>,
+    file_name: Option<String>,
     file_type: Option<String>,
     file_subtype: Option<String>,
 }
 
-public(package) fun create_evidence(
+public fun create_evidence(
+    dispute: &mut Dispute,
     description: String,
     blob_id: Option<String>,
+    file_name: Option<String>,
     file_type: Option<String>,
     file_subtype: Option<String>,
+    cap: &PartyCap, 
+    clock: &Clock,
     ctx: &mut TxContext
-): Evidence {
-    Evidence {
+) {
+    let evidence = Evidence {
         id: object::new(ctx),
+        party_cap_id: object::id(cap),
         description,
         blob_id,
+        file_name,
         file_type,
         file_subtype,
-    }
+    };
+
+    dispute.add_evidence(object::id(&evidence), cap, clock);
+    transfer::share_object(evidence);
 }
 
-public(package) fun modify_evidence(
+public fun modify_evidence(
     evidence: &mut Evidence,
     description: String,
     blob_id: Option<String>,
+    file_name: Option<String>,
     file_type: Option<String>,
     file_subtype: Option<String>,
+    cap: &PartyCap, 
 ) {
+    assert!(object::id(cap) == evidence.party_cap_id, EInvalidPartyCap);
+
     evidence.description = description;
     evidence.blob_id = blob_id;
+    evidence.file_name = file_name;
     evidence.file_type = file_type;
     evidence.file_subtype = file_subtype;
 }
 
-public(package) fun destruct_evidence(
-    evidence: Evidence
+public fun destroy_evidence(
+    dispute: &mut Dispute,
+    cap: &PartyCap,
+    evidence: Evidence,
+    clock: &Clock,
 ) {
+    assert!(object::id(cap) == evidence.party_cap_id, EInvalidPartyCap);
+
+    remove_evidence(dispute, object::id(&evidence), cap, clock);
+
     let Evidence {
         id,
+        party_cap_id: _,
         blob_id: _,
         description: _,
+        file_name: _,
         file_type: _,
         file_subtype: _,
     } = evidence;
