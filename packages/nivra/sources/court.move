@@ -34,7 +34,7 @@ use nivra::{
     },
     result::create_result,
 };
-use std::ascii::String;
+use std::string::String;
 use sui::{
     versioned::{Self, Versioned},
     balance::{Self, Balance},
@@ -470,7 +470,7 @@ public fun create_court(
     ai_court: bool,
     category: String,
     name: String,
-    icon: Option<String>,
+    icon: Option<std::ascii::String>,
     description: String,
     skills: vector<String>,
     min_stake: u64,

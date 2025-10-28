@@ -1,6 +1,8 @@
+// © 2025 Nivra Labs Ltd.
+
 module nivra::evidence;
 
-use std::ascii::String;
+use std::string::String;
 use nivra::dispute::Dispute;
 use nivra::dispute::PartyCap;
 use sui::clock::Clock;

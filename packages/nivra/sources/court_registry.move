@@ -8,7 +8,7 @@ module nivra::court_registry;
 // === Imports ===
 
 use nivra::constants::current_version;
-use std::ascii::String;
+use std::string::String;
 use sui::{
     table::{Self, Table},
     url::{Url, new_unsafe},
@@ -110,7 +110,7 @@ public(package) fun register_court(self: &mut CourtRegistry, court_id: ID, metad
 public(package) fun create_metadata(
     category: String,
     name: String,
-    icon: Option<String>,
+    icon: Option<std::ascii::String>,
     description: String,
     skills: vector<String>,
     min_stake: u64,

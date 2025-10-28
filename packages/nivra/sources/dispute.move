@@ -1,6 +1,8 @@
+// © 2025 Nivra Labs Ltd.
+
 module nivra::dispute;
 
-use std::ascii::String;
+use std::string::String;
 use sui::linked_table::{Self, LinkedTable};
 use sui::clock::Clock;
 use seal::bf_hmac_encryption::{

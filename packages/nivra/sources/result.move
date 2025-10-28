@@ -1,6 +1,6 @@
 module nivra::result;
 
-use std::ascii::String;
+use std::string::String;
 
 public struct Result has key, store {
     id: UID,
