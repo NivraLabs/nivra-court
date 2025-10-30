@@ -363,24 +363,6 @@ public fun cancel_dispute(
 }
 
 /// Open a new dispute in the court.
-///
-/// ### Parameters
-/// - `court`: Mutable reference to the `Court`.
-/// - `fee`: SUI fee = nivster count * court fee rate.
-/// - `contract`: Associated contract ID.
-/// - `description`: Dispute description.
-/// - `parties`: List of involved addresses.
-/// - `options`: Voting options.
-/// - `nivster_count`: Number of jurors.
-/// - `max_appeals`: Maximum appeals.
-/// - `evidence_period_ms`: Optional custom evidence duration.
-/// - `voting_period_ms`: Optional custom voting duration.
-/// - `appeal_period_ms`: Optional custom appeal duration.
-/// - `key_servers`: Public key servers.
-/// - `public_keys`: Juror public keys.
-/// - `threshold`: Encryption key servers threshold.
-/// - `r`: Randomness source.
-/// - `clock`: Global clock.
 #[allow(lint(public_random))]
 public fun open_dispute(
     court: &mut Court,
@@ -446,26 +428,6 @@ public fun open_dispute(
 // === Admin Functions ===
 
 /// Creates and registers a new court.
-///
-/// ### Parameters
-/// - `category`: Court category name.
-/// - `name`: Human-readable name of the court.
-/// - `icon`: Optional icon URL.
-/// - `description`: Court description.
-/// - `skills`: List of required skills.
-/// - `min_stake`: Minimum stake in NVR.
-/// - `fee_rate`: Dispute fee rate per nivster.
-/// - `default_evidence_period_ms`: Default evidence period (milliseconds).
-/// - `default_voting_period_ms`: Default voting period (milliseconds).
-/// - `default_appeal_period_ms`: Default appeal period (milliseconds).
-/// - `court_registry`: Court registry.
-/// - `_cap`: Nivra admin capability.
-///
-/// ### Returns
-/// - The `ID` of the newly created court.
-///
-/// ### Aborts
-/// - If registration in registry fails.
 public fun create_court(
     ai_court: bool,
     category: String,
