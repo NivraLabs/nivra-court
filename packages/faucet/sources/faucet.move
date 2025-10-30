@@ -19,7 +19,7 @@ const EDailyLimitReached: u64 = 1;
 // === Constants ===
 
 const DAY_MS: u64 = 86_400_000;
-const COIN_DAILY_LIMIT: u64 = 1000;
+const COIN_DAILY_LIMIT: u64 = 1000_000_000;
 
 // === Structs ===
 
