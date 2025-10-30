@@ -1,6 +1,13 @@
+// © 2025 Nivra Labs Ltd.
+
+
 module nivra::result;
 
+// === Imports ===
+
 use std::string::String;
+
+// === Structs ===
 
 public struct Result has key, store {
     id: UID,
@@ -10,6 +17,8 @@ public struct Result has key, store {
     results: vector<u64>,
     winner_option: u8,
 }
+
+// === Package Functions ===
 
 public(package) fun create_result(
     dispute_id: ID,

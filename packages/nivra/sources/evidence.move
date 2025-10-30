@@ -2,13 +2,21 @@
 
 module nivra::evidence;
 
+// === Imports ===
+
 use std::string::String;
-use nivra::dispute::Dispute;
-use nivra::dispute::PartyCap;
 use sui::clock::Clock;
-use nivra::dispute::remove_evidence;
+use nivra::dispute::{
+    remove_evidence,
+    Dispute,
+    PartyCap
+};
+
+// === Errors ===
 
 const EInvalidPartyCap: u64 = 1;
+
+// === Structs ===
 
 public struct Evidence has key, store {
     id: UID,
@@ -19,6 +27,8 @@ public struct Evidence has key, store {
     file_type: Option<String>,
     file_subtype: Option<String>,
 }
+
+// === Public Functions ===
 
 public fun create_evidence(
     dispute: &mut Dispute,

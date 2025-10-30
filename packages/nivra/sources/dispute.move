@@ -1,10 +1,23 @@
 // © 2025 Nivra Labs Ltd.
 
+/// Module handling decentralized dispute resolution logic
 module nivra::dispute;
 
+// === Imports ===
+
+use nivra::constants::{
+    max_evidence_limit,
+    dispute_status_active,
+    dispute_status_tie,
+    dispute_status_tallied
+};
 use std::string::String;
-use sui::linked_table::{Self, LinkedTable};
-use sui::clock::Clock;
+use sui::{
+    linked_table::{Self, LinkedTable},
+    clock::Clock,
+    vec_map::{Self, VecMap},
+    bls12381::g1_from_bytes
+};
 use seal::bf_hmac_encryption::{
     EncryptedObject,
     parse_encrypted_object,
@@ -14,13 +27,8 @@ use seal::bf_hmac_encryption::{
     PublicKey,
     decrypt
 };
-use sui::vec_map;
-use sui::vec_map::VecMap;
-use nivra::constants::max_evidence_limit;
-use sui::bls12381::g1_from_bytes;
-use nivra::constants::dispute_status_active;
-use nivra::constants::dispute_status_tie;
-use nivra::constants::dispute_status_tallied;
+
+// === Errors ===
 
 const EEvidenceFull: u64 = 1;
 const ENotPartyMember: u64 = 2;
@@ -34,18 +42,23 @@ const ENotEnoughKeys: u64 = 9;
 const EAlreadyFinalized: u64 = 10;
 const EInvalidDispute: u64 = 11;
 
+// === Structs ===
+
+/// Capability that grants permission to submit or modify evidence
 public struct PartyCap has key, store {
     id: UID,
     dispute_id: ID,
     party: address,
 }
 
+/// Capability that grants permission to cast a vote
 public struct VoterCap has key, store {
     id: UID,
     dispute_id: ID,
     voter: address,
 }
 
+/// Voter-specific state stored inside a dispute
 public struct VoterDetails has copy, drop, store {
     stake: u64,
     vote: Option<EncryptedObject>,
@@ -54,6 +67,7 @@ public struct VoterDetails has copy, drop, store {
     cap_issued: bool,
 }
 
+/// Dispute timing window definitions per round
 public struct TimeTable has copy, drop, store {
     round_init_ms: u64,
     evidence_period_ms: u64,
@@ -83,6 +97,10 @@ public struct Dispute has key {
     threshold: u8,
 }
 
+// === Public Functions ===
+
+/// Finalizes encrypted votes after voting period ends.
+/// Verifies threshold keys, decrypts votes, tallies result and sets dispute status.
 public fun finalize_vote(
     dispute: &mut Dispute,
     package_id: address,
@@ -137,6 +155,8 @@ public fun finalize_vote(
     tally_votes(dispute);
 }
 
+
+/// Cast an encrypted vote during the valid voting time window.
 public fun cast_vote(
     dispute: &mut Dispute,
     encrypted_vote: vector<u8>,
@@ -162,6 +182,7 @@ public fun cast_vote(
     v.vote = option::some(encrypted_vote);
 }
 
+/// Called by SEAL subsystem to authorize vote finalization.
 entry fun seal_approve(id: vector<u8>, dispute: &Dispute, clock: &Clock) {
     let voting_period_end = dispute.timetable.round_init_ms + dispute.timetable.evidence_period_ms
         + dispute.timetable.voting_period_ms;
@@ -169,6 +190,74 @@ entry fun seal_approve(id: vector<u8>, dispute: &Dispute, clock: &Clock) {
 
     assert!(current_time > voting_period_end, EVotingPeriodNotEnded);
     assert!(id == object::id(dispute).to_bytes(), EInvalidDispute);
+}
+
+// === View Functions ===
+
+public(package) fun options(dispute: &Dispute): vector<String> {
+    dispute.options
+}
+
+public(package) fun parties(dispute: &Dispute): vector<address> {
+    dispute.parties
+}
+
+public(package) fun voters_mut(dispute: &mut Dispute): &mut LinkedTable<address, VoterDetails> {
+    &mut dispute.voters
+}
+
+public(package) fun voters(dispute: &Dispute): &LinkedTable<address, VoterDetails> {
+    &dispute.voters
+}
+
+public(package) fun initiator(dispute: &Dispute): address {
+    dispute.initiator
+}
+
+public(package) fun contract(dispute: &Dispute): ID {
+    dispute.contract
+}
+
+public(package) fun nivster_count(dispute: &Dispute): u64 {
+    dispute.voters.length()
+}
+
+public(package) fun winner_option(dispute: &Dispute): Option<u8> {
+    dispute.winner_option
+}
+
+public(package) fun result(dispute: &Dispute): vector<u64> {
+    dispute.result
+}
+
+public(package) fun appeals_left(dispute: &Dispute): bool {
+    dispute.appeals_used < dispute.max_appeals
+}
+
+public(package) fun status(self: &Dispute): u64 {
+    self.status
+}
+
+public(package) fun multiplier(self: &VoterDetails): u64 {
+    self.multiplier
+}
+
+public(package) fun decrypted_vote(self: &VoterDetails): Option<u8> {
+    self.decrypted_vote
+}
+
+public(package) fun stake(self: &VoterDetails): u64 {
+    self.stake
+}
+
+// === Package Functions ===
+
+public(package) fun set_status(dispute: &mut Dispute, status: u64) {
+    dispute.status = status;
+}
+
+public(package) fun increase_appeals(dispute: &mut Dispute) {
+    dispute.appeals_used = dispute.appeals_used + 1;
 }
 
 public(package) fun add_evidence(
@@ -218,54 +307,6 @@ public(package) fun remove_evidence(
     evidence.swap_remove(*i.borrow());
 }
 
-public(package) fun get_options(dispute: &Dispute): vector<String> {
-    dispute.options
-}
-
-public(package) fun get_parties(dispute: &Dispute): vector<address> {
-    dispute.parties
-}
-
-public(package) fun get_voters_mut(dispute: &mut Dispute): &mut LinkedTable<address, VoterDetails> {
-    &mut dispute.voters
-}
-
-public(package) fun get_voters(dispute: &Dispute): &LinkedTable<address, VoterDetails> {
-    &dispute.voters
-}
-
-public(package) fun get_initiator(dispute: &Dispute): address {
-    dispute.initiator
-}
-
-public(package) fun get_contract_id(dispute: &Dispute): ID {
-    dispute.contract
-}
-
-public(package) fun set_status(dispute: &mut Dispute, status: u64) {
-    dispute.status = status;
-}
-
-public(package) fun get_nivster_count(dispute: &Dispute): u64 {
-    dispute.voters.length()
-}
-
-public(package) fun get_winner_option(dispute: &Dispute): Option<u8> {
-    dispute.winner_option
-}
-
-public(package) fun get_results(dispute: &Dispute): vector<u64> {
-    dispute.result
-}
-
-public(package) fun increase_appeals(dispute: &mut Dispute) {
-    dispute.appeals_used = dispute.appeals_used + 1;
-}
-
-public(package) fun has_appeals_left(dispute: &Dispute): bool {
-    dispute.appeals_used < dispute.max_appeals
-}
-
 public(package) fun is_party_member(dispute: &Dispute, cap: &PartyCap): bool {
     dispute.parties.find_index!(|party| *party == cap.party).is_some()
 }
@@ -295,22 +336,6 @@ public(package) fun create_voter_details(stake: u64): VoterDetails {
         multiplier: 1,
         cap_issued: false,
     }
-}
-
-public(package) fun get_status(self: &Dispute): u64 {
-    self.status
-}
-
-public(package) fun get_multiplier(self: &VoterDetails): u64 {
-    self.multiplier
-}
-
-public(package) fun get_decrypted_vote(self: &VoterDetails): Option<u8> {
-    self.decrypted_vote
-}
-
-public(package) fun getStake(self: &VoterDetails): u64 {
-    self.stake
 }
 
 public(package) fun increase_multiplier(self: &mut VoterDetails) {

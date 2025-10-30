@@ -48,7 +48,7 @@ use sui::{
 };
 use token::nvr::NVR;
 
-// === Constants ===
+// === Errors ===
 
 const EWrongVersion: u64 = 1;
 const ENotUpgrade: u64 = 2;
@@ -187,36 +187,36 @@ public fun distribute_rewards(
     ctx: &mut TxContext,
 ) {
     assert!(dispute.is_completed(clock), EDisputeNotCompleted);
-    assert!(dispute.get_status() == dispute_status_tallied(), EDisputeNotTallied);
+    assert!(dispute.status() == dispute_status_tallied(), EDisputeNotTallied);
 
     let court = court.load_inner_mut();
-    let winner_option = dispute.get_winner_option().destroy_some();
-    let voters = dispute.get_voters();
+    let winner_option = dispute.winner_option().destroy_some();
+    let voters = dispute.voters();
 
-    let majority_count = dispute.get_results()[winner_option as u64];
+    let majority_count = dispute.result()[winner_option as u64];
     let mut nvr_cut = 0;
     let mut i = linked_table::front(voters);
 
     while(i.is_some()) {
         let k = *i.borrow();
         let v = voters.borrow(k);
-        let vote = v.get_decrypted_vote();
+        let vote = v.decrypted_vote();
 
         // Omitting vote results in 30% penalty.
         if (vote.is_none()) {
-            let cut = std::u64::divide_and_round_up((v.getStake() * 30), 100);
+            let cut = std::u64::divide_and_round_up((v.stake() * 30), 100);
             let stake = court.stakes.borrow_mut(k);
-            stake.locked_amount = stake.locked_amount - v.getStake();
-            stake.amount = stake.amount + v.getStake() - cut;
+            stake.locked_amount = stake.locked_amount - v.stake();
+            stake.amount = stake.amount + v.stake() - cut;
             nvr_cut = nvr_cut + cut;
         };
 
         // Minority vote results in 25% penalty.
         if (vote.is_some() && *vote.borrow() != winner_option) {
-            let cut = std::u64::divide_and_round_up((v.getStake() * 25), 100);
+            let cut = std::u64::divide_and_round_up((v.stake() * 25), 100);
             let stake = court.stakes.borrow_mut(k);
-            stake.locked_amount = stake.locked_amount - v.getStake();
-            stake.amount = stake.amount + v.getStake() - cut;
+            stake.locked_amount = stake.locked_amount - v.stake();
+            stake.amount = stake.amount + v.stake() - cut;
             nvr_cut = nvr_cut + cut;
         };
 
@@ -227,7 +227,7 @@ public fun distribute_rewards(
         .div(std::uq64_64::from_int(majority_count))
         .to_int();
     let standard_sui_reward = std::u64::divide_and_round_up((court.fee_rate * 99), 100);
-    let mut case = court.cases.remove(dispute.get_contract_id());
+    let mut case = court.cases.remove(dispute.contract());
     let sui_reward = if (standard_sui_reward < std::u64::divide_and_round_up(case.reward.value(), majority_count)) {
         standard_sui_reward
     } else {
@@ -240,14 +240,14 @@ public fun distribute_rewards(
     while(i.is_some()) {
         let k = *i.borrow();
         let v = voters.borrow(k);
-        let vote = v.get_decrypted_vote();
+        let vote = v.decrypted_vote();
 
         if (vote.is_some() && *vote.borrow() == winner_option) {
             let stake = court.stakes.borrow_mut(k);
-            stake.locked_amount = stake.locked_amount - v.getStake();
-            stake.amount = stake.amount + v.getStake() + (nvr_reward * v.get_multiplier());
+            stake.locked_amount = stake.locked_amount - v.stake();
+            stake.amount = stake.amount + v.stake() + (nvr_reward * v.multiplier());
 
-            let coin = case.reward.split(sui_reward * v.get_multiplier()).into_coin(ctx);
+            let coin = case.reward.split(sui_reward * v.multiplier()).into_coin(ctx);
             transfer::public_transfer(coin, k);
         };
 
@@ -264,12 +264,12 @@ public fun distribute_rewards(
 
     transfer::public_transfer(remaining_balance, registry.treasury_address());
 
-    dispute.get_parties().do_ref!(|party| {
+    dispute.parties().do_ref!(|party| {
         transfer::public_transfer(create_result(
             object::id(dispute), 
-            dispute.get_contract_id(), 
-            dispute.get_options(), 
-            dispute.get_results(), 
+            dispute.contract(), 
+            dispute.options(), 
+            dispute.result(), 
             winner_option, 
             ctx
         ), *party)
@@ -290,19 +290,19 @@ public fun open_appeal(
     ctx: &mut TxContext,
 ) {
     assert!(dispute.is_party_member(cap), ENotPartyMember);
-    assert!(dispute.get_status() == dispute_status_tallied(), EDisputeNotTallied);
-    assert!(dispute.has_appeals_left(), ENoAppealsLeft);
+    assert!(dispute.status() == dispute_status_tallied(), EDisputeNotTallied);
+    assert!(dispute.appeals_left(), ENoAppealsLeft);
     assert!(dispute.is_appeal_period(clock), ENotAppealPeriod);
 
     let court = court.load_inner_mut();
-    let nivster_count = dispute.get_nivster_count();
+    let nivster_count = dispute.nivster_count();
 
     assert!(fee.value() == court.fee_rate * nivster_count, EInvalidFee);
 
-    let case = court.cases.borrow_mut(dispute.get_contract_id());
+    let case = court.cases.borrow_mut(dispute.contract());
     case.reward.join(fee.into_balance());
 
-    court.draw_nivsters(dispute.get_voters_mut(), nivster_count, r, ctx);
+    court.draw_nivsters(dispute.voters_mut(), nivster_count, r, ctx);
     dispute.increase_appeals();
     dispute.start_new_round(clock, ctx);
 }
@@ -316,11 +316,11 @@ public fun handle_dispute_tie(
     r: &Random,
     ctx: &mut TxContext,
 ) {
-    assert!(dispute.get_status() == dispute_status_tie(), EDisputeNotTie);
+    assert!(dispute.status() == dispute_status_tie(), EDisputeNotTie);
     assert!(!dispute.is_completed(clock), EDisputeCompleted);
 
     let court = court.load_inner_mut();
-    court.draw_nivsters(dispute.get_voters_mut(), 1, r, ctx);
+    court.draw_nivsters(dispute.voters_mut(), 1, r, ctx);
     dispute.start_new_round(clock, ctx);
 }
 
@@ -331,15 +331,15 @@ public fun cancel_dispute(
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
-    assert!(dispute.get_status() == dispute_status_tie() || dispute.get_status() == dispute_status_active(), EDisputeNotError);
+    assert!(dispute.status() == dispute_status_tie() || dispute.status() == dispute_status_active(), EDisputeNotError);
     assert!(dispute.is_completed(clock), EDisputeNotCompleted);
     dispute.set_status(dispute_status_canceled());
 
     let court = court.load_inner_mut();
-    let mut case = court.cases.remove(dispute.get_contract_id());
+    let mut case = court.cases.remove(dispute.contract());
 
     let coin = case.reward.withdraw_all().into_coin(ctx);
-    transfer::public_transfer(coin, dispute.get_initiator());
+    transfer::public_transfer(coin, dispute.initiator());
 
     let DisputeDetails { 
         dispute_id: _, 
@@ -347,7 +347,7 @@ public fun cancel_dispute(
     } = case;
     reward.destroy_zero();
 
-    let voters = dispute.get_voters();
+    let voters = dispute.voters();
     let mut i = linked_table::front(voters);
 
     while(i.is_some()) {
@@ -355,8 +355,8 @@ public fun cancel_dispute(
         let v = voters.borrow(k);
         let stake = court.stakes.borrow_mut(k);
 
-        stake.locked_amount = stake.locked_amount - v.getStake();
-        stake.amount = stake.amount + v.getStake();
+        stake.locked_amount = stake.locked_amount - v.stake();
+        stake.amount = stake.amount + v.stake();
 
         i = voters.next(k);
     };
