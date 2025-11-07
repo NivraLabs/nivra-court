@@ -1,6 +1,6 @@
 module contract_kit::test_contract;
 
-use std::ascii::String;
+use std::string::String;
 
 public struct TestContract has key, store{
     id: UID,
