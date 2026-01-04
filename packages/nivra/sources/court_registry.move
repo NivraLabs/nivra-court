@@ -14,7 +14,6 @@ use sui::{
 // === Errors ===
 const EWrongVersion: u64 = 1;
 const ENotUpgrade: u64 = 2;
-const ECourtAlreadyExists: u64 = 3;
 
 // === Structs ===
 public struct NivraAdminCap has key, store {
@@ -60,7 +59,6 @@ entry fun migrate(self: &mut CourtRegistry, _cap: &NivraAdminCap) {
 // === Package Functions ===
 public(package) fun register_court(self: &mut CourtRegistry, court_id: ID, metadata: CourtMetadata) {
     let self = self.load_inner_mut();
-    assert!(!self.courts.contains(court_id), ECourtAlreadyExists);
     self.courts.add(court_id, metadata);
 }
 
