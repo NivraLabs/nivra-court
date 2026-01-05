@@ -25,6 +25,10 @@ use nivra::court_registry::create_metadata;
 use nivra::dispute::VoterDetails;
 use nivra::dispute::create_voter_details;
 use nivra::dispute::create_dispute;
+use nivra::dispute::Dispute;
+use nivra::dispute::PartyCap;
+use nivra::constants::dispute_status_active;
+use nivra::constants::dispute_status_response;
 
 // === Constants ===
 const DRAW_STATUS_NOT_ENOUGH_NIVSTERS: u64 = 0;
@@ -33,6 +37,7 @@ const DRAW_STATUS_SUCCESS: u64 = 1;
 const INIT_NIVSTER_COUNT: u64 = 10;
 const MIN_OPTIONS: u64 = 2;
 const MAX_OPTIONS: u64 = 10;
+const PARTY_COUNT: u64 = 2;
 // Dispute error event codes
 const DEEC_NOT_ENOUGH_NIVSTERS_INIT: u64 = 1;
 const DEEC_EXISTING_DISPUTE: u64 = 2;
@@ -44,6 +49,8 @@ const ENotEnoughNVR: u64 = 3;
 const ENotOperational: u64 = 4;
 const EInvalidFee: u64 = 5;
 const EExistingDispute: u64 = 6;
+const ENotResponsePeriod: u64 = 7;
+const EInvalidDispute: u64 = 8;
 const EDisputeNotTie: u64 = 9;
 const EDisputeNotCompleted: u64 = 10;
 const EDisputeCompleted: u64 = 11;
@@ -55,6 +62,8 @@ const EDisputeNotError: u64 = 16;
 const ENotPartyMember: u64 = 17;
 const EBalanceMismatchInternal: u64 = 18;
 const ENivsterMismatchInternal: u64 = 19;
+const EWrongParty: u64 = 20;
+const EInvalidPartyCount: u64 = 21;
 
 // === Structs ===
 public enum Status has copy, drop, store {
@@ -162,6 +171,31 @@ public fun withdraw(self: &mut Court, ctx: &mut TxContext): Coin<NVR> {
     }
 }
 
+public fun accept_dispute(
+    court: &mut Court,
+    dispute: &mut Dispute,
+    fee: Coin<SUI>,
+    cap: &PartyCap,
+    clock: &Clock,
+) {
+    let self = court.load_inner_mut();
+
+    assert!(dispute.is_response_period(clock), ENotResponsePeriod);
+    assert!(fee.value() == self.dispute_fee, EInvalidFee);
+    assert!(object::id(dispute) == cap.dispute_id(), EInvalidDispute);
+
+    let dispute_details = self.cases.borrow_mut(dispute.contract());
+
+    // Make sure that the fee is paid by the opposing party.
+    assert!(!dispute_details.depositors.contains(&cap.party()), EWrongParty);
+
+    dispute_details.depositors.insert(cap.party(), fee.value());
+    coin::put(&mut dispute_details.pool, fee);
+
+    // Dispute status is set to active after the other party accepts the case.
+    dispute.set_status(dispute_status_active());
+}
+
 entry fun open_dispute(
     court: &mut Court,
     fee: Coin<SUI>,
@@ -187,6 +221,7 @@ entry fun open_dispute(
     assert!(self.status == Status::Running, ENotOperational);
     assert!(fee.value() == self.dispute_fee, EInvalidFee);
     assert!(options.length() >= MIN_OPTIONS && options.length() <= MAX_OPTIONS, EInvalidOptionsAmount);
+    assert!(parties.length() == PARTY_COUNT, EInvalidPartyCount);
 
     // Allow only 1 dispute to exist at a time per contract instance.
     if(self.cases.contains(contract)) {
@@ -243,7 +278,7 @@ entry fun open_dispute(
         ctx
     );
 
-    // Fill in dispute details and place to cases map.
+    // Fill in dispute details and place into case map.
     let mut dispute_details = DisputeDetails {
         dispute_id,
         depositors: vec_map::empty(),

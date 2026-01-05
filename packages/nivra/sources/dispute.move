@@ -20,6 +20,8 @@ use seal::bf_hmac_encryption::{
     decrypt
 };
 use nivra::constants::dispute_status_response;
+use std::address;
+use nivra::constants::dispute_status_active;
 
 // === Errors ===
 
@@ -88,7 +90,47 @@ public struct Dispute has key {
     threshold: u8,
 }
 
+// === Public Functions ===
+
+public fun is_response_period(dispute: &Dispute, clock: &Clock): bool {
+    let response_period_end = dispute.timetable.round_init_ms + dispute.timetable.response_period_ms;
+    let current_time = clock.timestamp_ms();
+
+    current_time <= response_period_end && dispute.status == dispute_status_response()
+}
+
+public fun is_evidence_period(dispute: &Dispute, clock: &Clock): bool {
+    let tt = dispute.timetable;
+    let evidence_period_end = tt.round_init_ms + tt.response_period_ms + tt.evidence_period_ms;
+    let current_time = clock.timestamp_ms();
+
+    // Start the evidence period soon as other party has responded (status = active)
+    current_time <= evidence_period_end && dispute.status == dispute_status_active()
+}
+
+// === View Functions ===
+
+public fun contract(dispute: &Dispute): ID {
+    dispute.contract
+}
+
+public fun status(dispute: &Dispute): u64 {
+    dispute.status
+}
+
+public fun dispute_id(cap: &PartyCap): ID {
+    cap.dispute_id
+}
+
+public fun party(cap: &PartyCap): address {
+    cap.party
+}
+
 // === Package Functions ===
+
+public(package) fun set_status(dispute: &mut Dispute, status: u64) {
+    dispute.status = status;
+}
 
 public(package) fun create_dispute(
     initiator: address,
