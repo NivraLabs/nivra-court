@@ -15,6 +15,7 @@ use sui::{
     sui::SUI,
     linked_table::borrow_mut,
     event,
+    vec_map::{Self, VecMap},
 };
 use token::nvr::NVR;
 use nivra::court_registry::CourtRegistry;
@@ -23,10 +24,18 @@ use nivra::constants::current_version;
 use nivra::court_registry::create_metadata;
 use nivra::dispute::VoterDetails;
 use nivra::dispute::create_voter_details;
+use nivra::dispute::create_dispute;
 
 // === Constants ===
 const DRAW_STATUS_NOT_ENOUGH_NIVSTERS: u64 = 0;
 const DRAW_STATUS_SUCCESS: u64 = 1;
+// Default dispute rules
+const INIT_NIVSTER_COUNT: u64 = 10;
+const MIN_OPTIONS: u64 = 2;
+const MAX_OPTIONS: u64 = 10;
+// Dispute error event codes
+const DEEC_NOT_ENOUGH_NIVSTERS_INIT: u64 = 1;
+const DEEC_EXISTING_DISPUTE: u64 = 2;
 
 // === Errors ===
 const EWrongVersion: u64 = 1;
@@ -35,12 +44,10 @@ const ENotEnoughNVR: u64 = 3;
 const ENotOperational: u64 = 4;
 const EInvalidFee: u64 = 5;
 const EExistingDispute: u64 = 6;
-const ENotEnoughNivsters: u64 = 7;
-const ENoNivsters: u64 = 8;
 const EDisputeNotTie: u64 = 9;
 const EDisputeNotCompleted: u64 = 10;
 const EDisputeCompleted: u64 = 11;
-const ENotEnoughOptions: u64 = 12;
+const EInvalidOptionsAmount: u64 = 12;
 const ENotAppealPeriod: u64 = 13;
 const ENoAppealsLeft: u64 = 14;
 const EDisputeNotTallied: u64 = 15;
@@ -62,7 +69,8 @@ public struct Stake has copy, drop, store {
 
 public struct DisputeDetails has store {
     dispute_id: ID,
-    reward: Balance<SUI>,
+    depositors: VecMap<address, u64>, // Amount per address
+    pool: Balance<SUI>,
 }
 
 public struct Court has key {
@@ -76,7 +84,7 @@ public struct CourtInner has store {
     cases: Table<ID, DisputeDetails>,
     stake_pool: Balance<NVR>,
     stakes: LinkedTable<address, Stake>,
-    fee_rate: u64,
+    dispute_fee: u64,
     min_stake: u64,
     default_response_period_ms: u64,
     default_evidence_period_ms: u64,
@@ -94,6 +102,12 @@ public struct StakeEvent has copy, drop {
 public struct WithdrawEvent has copy, drop {
     sender: address,
     amount: u64,
+}
+
+public struct DisputeErrorEvent has copy, drop {
+    sender: address,
+    contract: ID,
+    error_code: u64,
 }
 
 // === Public Functions ===
@@ -148,6 +162,100 @@ public fun withdraw(self: &mut Court, ctx: &mut TxContext): Coin<NVR> {
     }
 }
 
+entry fun open_dispute(
+    court: &mut Court,
+    fee: Coin<SUI>,
+    contract: ID,
+    description: String,
+    parties: vector<address>,
+    options: vector<String>,
+    max_appeals: u8,
+    response_period_ms: Option<u64>,
+    evidence_period_ms: Option<u64>,
+    voting_period_ms: Option<u64>,
+    appeal_period_ms: Option<u64>,
+    key_servers: vector<address>,
+    public_keys: vector<vector<u8>>,
+    threshold: u8,
+    r: &Random,
+    clock: &Clock, 
+    ctx: &mut TxContext
+) {
+    let court_id = object::id(court);
+    let self = court.load_inner_mut();
+
+    assert!(self.status == Status::Running, ENotOperational);
+    assert!(fee.value() == self.dispute_fee, EInvalidFee);
+    assert!(options.length() >= MIN_OPTIONS && options.length() <= MAX_OPTIONS, EInvalidOptionsAmount);
+
+    // Allow only 1 dispute to exist at a time per contract instance.
+    if(self.cases.contains(contract)) {
+        event::emit(DisputeErrorEvent {
+            sender: ctx.sender(),
+            contract,
+            error_code: DEEC_EXISTING_DISPUTE,
+        });
+
+        transfer::public_transfer(fee, ctx.sender());
+        return
+    };
+
+    // Unwrap dispute timetable or use court defaults if not specified.
+    let response_period = response_period_ms.destroy_or!(self.default_response_period_ms);
+    let evidence_period = evidence_period_ms.destroy_or!(self.default_evidence_period_ms);
+    let voting_period = voting_period_ms.destroy_or!(self.default_voting_period_ms);
+    let appeal_period = appeal_period_ms.destroy_or!(self.default_appeal_period_ms);
+
+    // Draw initial nivsters to the case.
+    let mut nivsters = linked_table::new(ctx);
+    let draw_status = draw_nivsters(self, &mut nivsters, INIT_NIVSTER_COUNT, r, ctx);
+
+    // Not enough nivsters to start a dispute
+    if (draw_status == DRAW_STATUS_NOT_ENOUGH_NIVSTERS) {
+        event::emit(DisputeErrorEvent {
+            sender: ctx.sender(),
+            contract,
+            error_code: DEEC_NOT_ENOUGH_NIVSTERS_INIT,
+        });
+
+        nivsters.destroy_empty();
+        transfer::public_transfer(fee, ctx.sender());
+        return
+    };
+
+    let dispute_id = create_dispute(
+        ctx.sender(),
+        contract,
+        court_id,
+        description,
+        response_period,
+        evidence_period, 
+        voting_period, 
+        appeal_period, 
+        max_appeals, 
+        parties, 
+        nivsters, 
+        options, 
+        key_servers, 
+        public_keys, 
+        threshold,
+        clock, 
+        ctx
+    );
+
+    // Fill in dispute details and place to cases map.
+    let mut dispute_details = DisputeDetails {
+        dispute_id,
+        depositors: vec_map::empty(),
+        pool: balance::zero(),
+    };
+
+    dispute_details.depositors.insert(ctx.sender(), fee.value());
+    coin::put(&mut dispute_details.pool, fee);
+
+    self.cases.add(contract, dispute_details);
+}
+
 // === Admin Functions ===
 
 public fun create_court(
@@ -159,7 +267,7 @@ public fun create_court(
     description: String,
     skills: String,
     min_stake: u64,
-    fee_rate: u64,
+    dispute_fee: u64,
     default_response_period_ms: u64,
     default_evidence_period_ms: u64,
     default_voting_period_ms: u64,
@@ -172,7 +280,7 @@ public fun create_court(
         cases: table::new(ctx),
         stake_pool: balance::zero<NVR>(),
         stakes: linked_table::new(ctx),
-        fee_rate, 
+        dispute_fee, 
         min_stake,
         default_response_period_ms,
         default_evidence_period_ms,
