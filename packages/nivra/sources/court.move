@@ -30,7 +30,6 @@ use nivra::dispute::PartyCap;
 use nivra::constants::dispute_status_active;
 use nivra::constants::dispute_status_response;
 use nivra::result::create_result;
-use nivra::constants::dispute_status_completed;
 use nivra::constants::dispute_status_canceled;
 
 // === Constants ===
@@ -217,7 +216,7 @@ public fun cancel_dispute(
         // Refund the winner
         transfer::public_transfer(case.pool.split(*highest_deposit).into_coin(ctx), *winner_address);
 
-        // Distribute rewards/stakes
+        // Distribute rewards & refund stakes
         let voters = dispute.voters();
         let remaining_amount = case.pool.value();
         let nivra_cut = std::uq64_64::from_int(remaining_amount)
@@ -239,7 +238,7 @@ public fun cancel_dispute(
 
             // Failsafe. Should never throw.
             assert!(stake.locked_amount >= v.stake(), EInvalidLockAmountInternal);
-            
+
             stake.locked_amount = stake.locked_amount - v.stake();
             stake.amount = stake.amount + v.stake();
             stake.reward_amount = stake.reward_amount + nivster_cut;

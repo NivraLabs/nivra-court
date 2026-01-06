@@ -23,6 +23,9 @@ use nivra::constants::dispute_status_response;
 use std::address;
 use nivra::constants::dispute_status_active;
 
+// === Constants ===
+const MAX_EVIDENCE_LIMIT: u64 = 3;
+
 // === Errors ===
 
 const EEvidenceFull: u64 = 1;
@@ -155,6 +158,43 @@ public fun stake(voter_details: &VoterDetails): u64 {
 }
 
 // === Package Functions ===
+
+public(package) fun remove_evidence(
+    dispute: &mut Dispute,
+    evidence_id: ID,
+    cap: &PartyCap, 
+    clock: &Clock
+) {
+    assert!(dispute.is_evidence_period(clock), ENotEvidencePeriod);
+    assert!(object::id(dispute) == cap.dispute_id, ENotPartyMember);
+    assert!(dispute.evidence.contains(&cap.party), ENoEvidenceFound);
+
+    let evidence = dispute.evidence.get_mut(&cap.party);
+    let i = evidence.find_index!(|evidence| evidence == evidence_id);
+
+    assert!(i.is_some(), ENoEvidenceFound);
+
+    evidence.remove(*i.borrow());
+}
+
+public(package) fun add_evidence(
+    dispute: &mut Dispute, 
+    evidence_id: ID, 
+    cap: &PartyCap, 
+    clock: &Clock
+) {
+    assert!(dispute.is_evidence_period(clock), ENotEvidencePeriod);
+    assert!(object::id(dispute) == cap.dispute_id, ENotPartyMember);
+
+    if (!dispute.evidence.contains(&cap.party)) {
+        dispute.evidence.insert(cap.party, vector[]);
+    };
+
+    let evidence = dispute.evidence.get_mut(&cap.party);
+
+    assert!(evidence.length() < MAX_EVIDENCE_LIMIT, EEvidenceFull);
+    evidence.push_back(evidence_id);
+}
 
 public(package) fun set_status(dispute: &mut Dispute, status: u64) {
     dispute.status = status;
