@@ -15,7 +15,7 @@ public struct Result has key, store {
     options: vector<String>,
     winner_option: Option<u8>,
     parties: vector<address>,
-    winner_party: Option<u8>,
+    winner_party: u8,
     max_appeals: u8,
 }
 
@@ -41,7 +41,7 @@ public fun parties(result: &Result): vector<address> {
     result.parties
 }
 
-public fun winner_party(result: &Result): Option<u8> {
+public fun winner_party(result: &Result): u8 {
     result.winner_party
 }
 
@@ -57,7 +57,7 @@ public(package) fun create_result(
     options: vector<String>,
     winner_option: Option<u8>,
     parties: vector<address>,
-    winner_party: Option<u8>,
+    winner_party: u8,
     max_appeals: u8,
     ctx: &mut TxContext,
 ): Result {

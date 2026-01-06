@@ -20,8 +20,9 @@ use seal::bf_hmac_encryption::{
     decrypt
 };
 use nivra::constants::dispute_status_response;
-use std::address;
 use nivra::constants::dispute_status_active;
+use nivra::constants::dispute_status_tallied;
+use nivra::constants::dispute_status_tie;
 
 // === Constants ===
 const MAX_EVIDENCE_LIMIT: u64 = 3;
@@ -35,7 +36,7 @@ const ENotEvidencePeriod: u64 = 4;
 const EInvalidVote: u64 = 5;
 const ENotVotingPeriod: u64 = 6;
 const ENotVoter: u64 = 7;
-const EVotingPeriodNotEnded: u64 = 8;
+const ENotAppealPeriodUntallied: u64 = 8;
 const ENotEnoughKeys: u64 = 9;
 const EAlreadyFinalized: u64 = 10;
 const EInvalidDispute: u64 = 11;
@@ -58,6 +59,8 @@ public struct VoterDetails has copy, drop, store {
     stake: u64,
     vote: Option<EncryptedObject>,
     decrypted_vote: Option<u8>,
+    party_vote: Option<EncryptedObject>,
+    decrypted_party_vote: Option<u8>,
     cap_issued: bool,
 }
 
@@ -95,6 +98,107 @@ public struct Dispute has key {
 
 // === Public Functions ===
 
+public fun finalize_vote(
+    dispute: &mut Dispute,
+    package_id: address,
+    derived_keys: &vector<vector<u8>>,
+    key_servers: &vector<address>,
+    clock: &Clock,
+) {
+    assert!(dispute.is_appeal_period_untallied(clock), ENotAppealPeriodUntallied);
+    assert!(key_servers.length() == derived_keys.length());
+    assert!(derived_keys.length() as u8 >= dispute.threshold, ENotEnoughKeys);
+    assert!(dispute.result.length() == 0, EAlreadyFinalized);
+
+    let verified_derived_keys: vector<VerifiedDerivedKey> = verify_derived_keys(
+        &derived_keys.map_ref!(|k| g1_from_bytes(k)), 
+        package_id, 
+        object::id(dispute).to_bytes(), 
+        &key_servers
+            .map_ref!(|ks1| dispute.key_servers.find_index!(|ks2| ks1 == ks2).destroy_some())
+            .map!(|i| new_public_key(dispute.key_servers[i].to_id(), dispute.public_keys[i])),
+    );
+
+    let all_public_keys: vector<PublicKey> = dispute
+        .key_servers
+        .zip_map!(dispute.public_keys, |ks, pk| new_public_key(ks.to_id(), pk));
+    
+    let mut result = vector::tabulate!(dispute.options.length() + 1, |_| 0);
+    let mut party_result = vector::tabulate!(dispute.parties.length(), |_| 0);
+    let mut i = linked_table::front(&dispute.voters);
+
+    while(i.is_some()) {
+        let k = *i.borrow();
+        let v = dispute.voters.borrow_mut(k);
+
+        // Decrypt vote
+        v.vote.do_ref!(|vote| {
+            decrypt(vote, &verified_derived_keys, &all_public_keys)
+            .do_ref!(|decrypted| {
+                if (decrypted.length() == 1 && decrypted[0] as u64 <= dispute.options.length()) {
+                    let option = decrypted[0];
+                    v.decrypted_vote = option::some(option);
+                    *&mut result[option as u64] = result[option as u64] + 1;
+                }
+            });
+        });
+
+        // Decrypt party vote
+        v.party_vote.do_ref!(|party_vote| {
+            decrypt(party_vote, &verified_derived_keys, &all_public_keys)
+            .do_ref!(|decrypted| {
+                if (decrypted.length() == 1 && decrypted[0] as u64 < dispute.parties.length()) {
+                    let option = decrypted[0];
+                    v.decrypted_party_vote = option::some(option);
+                    *&mut party_result[option as u64] = party_result[option as u64] + 1;
+                }
+            })
+        });
+
+        i = dispute.voters.next(k);
+    };
+
+    dispute.result = result;
+    dispute.party_result = party_result;
+    tally_votes(dispute);
+}
+
+public fun cast_vote(
+    dispute: &mut Dispute,
+    encrypted_vote: vector<u8>,
+    encrypted_party_vote: vector<u8>,
+    cap: &VoterCap,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    assert!(dispute.is_voting_period(clock), ENotVotingPeriod);
+    assert!(dispute.voters.contains(cap.voter), ENotVoter);
+
+    let encrypted_vote = parse_encrypted_object(encrypted_vote);
+    let encrypted_party_vote = parse_encrypted_object(encrypted_party_vote);
+
+    assert!(encrypted_vote.aad().borrow() == ctx.sender().to_bytes(), EInvalidVote);
+    assert!(encrypted_party_vote.aad().borrow() == ctx.sender().to_bytes(), EInvalidVote);
+
+    assert!(encrypted_vote.services() == dispute.key_servers, EInvalidVote);
+    assert!(encrypted_party_vote.services() == dispute.key_servers, EInvalidVote);
+
+    assert!(encrypted_vote.threshold() == dispute.threshold, EInvalidVote);
+    assert!(encrypted_party_vote.threshold() == dispute.threshold, EInvalidVote);
+
+    assert!(encrypted_vote.id() == object::id(dispute).to_bytes(), EInvalidVote);
+    assert!(encrypted_party_vote.id() == object::id(dispute).to_bytes(), EInvalidVote);
+
+    let v = dispute.voters.borrow_mut(cap.voter);
+    v.vote = option::some(encrypted_vote);
+    v.party_vote = option::some(encrypted_party_vote);
+}
+
+entry fun seal_approve(id: vector<u8>, dispute: &Dispute, clock: &Clock) {
+    assert!(dispute.is_appeal_period_untallied(clock), ENotAppealPeriodUntallied);
+    assert!(id == object::id(dispute).to_bytes(), EInvalidDispute);
+}
+
 public fun is_response_period(dispute: &Dispute, clock: &Clock): bool {
     let response_period_end = dispute.timetable.round_init_ms + dispute.timetable.response_period_ms;
     let current_time = clock.timestamp_ms();
@@ -109,6 +213,42 @@ public fun is_evidence_period(dispute: &Dispute, clock: &Clock): bool {
 
     // Start the evidence period soon as other party has responded (status = active)
     current_time <= evidence_period_end && dispute.status == dispute_status_active()
+}
+
+public fun is_voting_period(dispute: &Dispute, clock: &Clock): bool {
+    let tt = dispute.timetable;
+    let voting_period_start = tt.round_init_ms + tt.response_period_ms + tt.evidence_period_ms;
+    let voting_period_end = voting_period_start + tt.voting_period_ms;
+    let current_time = clock.timestamp_ms();
+
+    current_time > voting_period_start && current_time <= voting_period_end && dispute.status == dispute_status_active()
+}
+
+public fun is_appeal_period_untallied(dispute: &Dispute, clock: &Clock): bool {
+    let tt = dispute.timetable;
+    let appeal_period_start = tt.round_init_ms + tt.response_period_ms + tt.evidence_period_ms + tt.voting_period_ms;
+    let appeal_period_end = appeal_period_start + tt.appeal_period_ms;
+    let current_time = clock.timestamp_ms();
+
+    current_time > appeal_period_start && current_time <= appeal_period_end && dispute.status == dispute_status_active()
+}
+
+public fun is_appeal_period_tallied(dispute: &Dispute, clock: &Clock): bool {
+    let tt = dispute.timetable;
+    let appeal_period_start = tt.round_init_ms + tt.response_period_ms + tt.evidence_period_ms + tt.voting_period_ms;
+    let appeal_period_end = appeal_period_start + tt.appeal_period_ms;
+    let current_time = clock.timestamp_ms();
+
+    current_time > appeal_period_start && current_time <= appeal_period_end && dispute.status == dispute_status_tallied()
+}
+
+public fun is_appeal_period_tie(dispute: &Dispute, clock: &Clock): bool {
+    let tt = dispute.timetable;
+    let appeal_period_start = tt.round_init_ms + tt.response_period_ms + tt.evidence_period_ms + tt.voting_period_ms;
+    let appeal_period_end = appeal_period_start + tt.appeal_period_ms;
+    let current_time = clock.timestamp_ms();
+
+    current_time > appeal_period_start && current_time <= appeal_period_end && dispute.status == dispute_status_tie()
 }
 
 // === View Functions ===
@@ -158,6 +298,38 @@ public fun stake(voter_details: &VoterDetails): u64 {
 }
 
 // === Package Functions ===
+
+public(package) fun tally_votes(dispute: &mut Dispute) {
+    // Check winner option.
+    let mut highest_option = 0;
+    let mut second_highest_option = 0;
+
+    dispute.result.do_ref!(|option_votes| {
+        if (*option_votes >= highest_option) {
+            second_highest_option = highest_option;
+            highest_option = *option_votes;
+        };
+    });
+
+    // Check winner party.
+    let mut highest_party_option = 0;
+    let mut second_highest_party_option = 0;
+
+    dispute.party_result.do_ref!(|party_votes| {
+        if (*party_votes >= highest_party_option) {
+            second_highest_party_option = highest_party_option;
+            highest_party_option = *party_votes;
+        };
+    });
+
+    if (highest_option == second_highest_option || highest_party_option == second_highest_party_option) {
+        dispute.status = dispute_status_tie();
+    } else {
+        dispute.winner_option = dispute.result.find_index!(|res| res == highest_option).map!(|res| res as u8);
+        dispute.winner_party = dispute.party_result.find_index!(|res| res == highest_party_option).map!(|res| res as u8);
+        dispute.status = dispute_status_tallied();
+    };
+}
 
 public(package) fun remove_evidence(
     dispute: &mut Dispute,
@@ -301,6 +473,8 @@ public(package) fun create_voter_details(stake: u64): VoterDetails {
         stake,
         vote: std::option::none(),
         decrypted_vote: std::option::none(),
+        party_vote: std::option::none(),
+        decrypted_party_vote: std::option::none(),
         cap_issued: false,
     }
 }

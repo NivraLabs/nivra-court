@@ -211,7 +211,8 @@ public fun cancel_dispute(
         // Get the index of the winner address.
         let winner_party = dispute.parties()
         .find_index!(|addr| addr == winner_address)
-        .map!(|val| val as u8 );
+        .map!(|val| val as u8 )
+        .extract();
 
         // Refund the winner
         transfer::public_transfer(case.pool.split(*highest_deposit).into_coin(ctx), *winner_address);
