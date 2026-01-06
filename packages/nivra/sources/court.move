@@ -29,6 +29,9 @@ use nivra::dispute::Dispute;
 use nivra::dispute::PartyCap;
 use nivra::constants::dispute_status_active;
 use nivra::constants::dispute_status_response;
+use nivra::result::create_result;
+use nivra::constants::dispute_status_completed;
+use nivra::constants::dispute_status_canceled;
 
 // === Constants ===
 const DRAW_STATUS_NOT_ENOUGH_NIVSTERS: u64 = 0;
@@ -38,6 +41,7 @@ const INIT_NIVSTER_COUNT: u64 = 10;
 const MIN_OPTIONS: u64 = 2;
 const MAX_OPTIONS: u64 = 10;
 const PARTY_COUNT: u64 = 2;
+const MAX_APPEALS: u8 = 3;
 // Dispute error event codes
 const DEEC_NOT_ENOUGH_NIVSTERS_INIT: u64 = 1;
 const DEEC_EXISTING_DISPUTE: u64 = 2;
@@ -64,6 +68,9 @@ const EBalanceMismatchInternal: u64 = 18;
 const ENivsterMismatchInternal: u64 = 19;
 const EWrongParty: u64 = 20;
 const EInvalidPartyCount: u64 = 21;
+const EInitiatorNotParty: u64 = 22;
+const EInvalidAppealCount: u64 = 23;
+const EInvalidLockAmountInternal: u64 = 24;
 
 // === Structs ===
 public enum Status has copy, drop, store {
@@ -72,8 +79,9 @@ public enum Status has copy, drop, store {
 }
 
 public struct Stake has copy, drop, store {
-    amount: u64,
-    locked_amount: u64,
+    amount: u64,        // NVR
+    locked_amount: u64, // NVR
+    reward_amount: u64, // SUI
 }
 
 public struct DisputeDetails has store {
@@ -92,6 +100,7 @@ public struct CourtInner has store {
     status: Status,
     cases: Table<ID, DisputeDetails>,
     stake_pool: Balance<NVR>,
+    reward_pool: Balance<SUI>,
     stakes: LinkedTable<address, Stake>,
     dispute_fee: u64,
     min_stake: u64,
@@ -110,7 +119,8 @@ public struct StakeEvent has copy, drop {
 
 public struct WithdrawEvent has copy, drop {
     sender: address,
-    amount: u64,
+    amount_nvr: u64,
+    amount_sui: u64,
 }
 
 public struct DisputeErrorEvent has copy, drop {
@@ -137,6 +147,7 @@ public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
         self.stakes.push_back(sender, Stake {
             amount,
             locked_amount: 0,
+            reward_amount: 0,
         });
     };
 
@@ -146,7 +157,7 @@ public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
     });
 }
 
-public fun withdraw(self: &mut Court, ctx: &mut TxContext): Coin<NVR> {
+public fun withdraw(self: &mut Court, ctx: &mut TxContext): (Coin<NVR>, Coin<SUI>) {
     let self = self.load_inner_mut();
     let sender = ctx.sender();
     
@@ -157,18 +168,110 @@ public fun withdraw(self: &mut Court, ctx: &mut TxContext): Coin<NVR> {
             self.stakes.push_back(sender, Stake {
                 amount: 0,
                 locked_amount: stake.locked_amount,
+                reward_amount: 0,
             });
         };
 
         event::emit(WithdrawEvent { 
             sender, 
-            amount: stake.amount,
+            amount_nvr: stake.amount,
+            amount_sui: stake.reward_amount,
         });
 
-        coin::take(&mut self.stake_pool, stake.amount, ctx)
+        (coin::take(&mut self.stake_pool, stake.amount, ctx), coin::take(&mut self.reward_pool, stake.reward_amount, ctx))
     } else {
-        coin::zero<NVR>(ctx)
+        (coin::zero<NVR>(ctx), coin::zero<SUI>(ctx))
     }
+}
+
+public fun cancel_dispute(
+    court: &mut Court,
+    court_registry: &CourtRegistry,
+    dispute: &mut Dispute,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    let self = court.load_inner_mut();
+
+    // The other party did not accept the dispute/appeal in time. Party with more deposits wins by default.
+    if (!dispute.is_response_period(clock) && dispute.status() == dispute_status_response()) {
+        let mut case = self.cases.remove(dispute.contract());
+
+        // Get the winner address & winner's deposit amount
+        let (mut winner_address, mut highest_deposit) = case.depositors.get_entry_by_idx(0);
+
+        if (case.depositors.length() == 2) {
+            let (other_party, deposit) = case.depositors.get_entry_by_idx(1);
+
+            if (*deposit > *highest_deposit) {
+                winner_address = other_party;
+                highest_deposit = deposit;
+            };
+        };
+
+        // Get the index of the winner address.
+        let winner_party = dispute.parties()
+        .find_index!(|addr| addr == winner_address)
+        .map!(|val| val as u8 );
+
+        // Refund the winner
+        transfer::public_transfer(case.pool.split(*highest_deposit).into_coin(ctx), *winner_address);
+
+        // Distribute rewards/stakes
+        let voters = dispute.voters();
+        let remaining_amount = case.pool.value();
+        let nivra_cut = std::uq64_64::from_int(remaining_amount)
+        .div(std::uq64_64::from_int(20))
+        .to_int(); // 5%
+        let nivster_cut = std::uq64_64::from_int(remaining_amount - nivra_cut)
+        .div(std::uq64_64::from_int(voters.length()))
+        .to_int();
+
+        transfer::public_transfer(case.pool.split(nivra_cut).into_coin(ctx), court_registry.treasury_address());
+        self.reward_pool.join(case.pool.withdraw_all());
+
+        let mut i = linked_table::front(voters);
+
+        while(i.is_some()) {
+            let k = *i.borrow();
+            let v = voters.borrow(k);
+            let stake = self.stakes.borrow_mut(k);
+
+            // Failsafe. Should never throw.
+            assert!(stake.locked_amount >= v.stake(), EInvalidLockAmountInternal);
+            
+            stake.locked_amount = stake.locked_amount - v.stake();
+            stake.amount = stake.amount + v.stake();
+            stake.reward_amount = stake.reward_amount + nivster_cut;
+            i = voters.next(k);
+        };
+
+        // Distribute result to both parties.
+        dispute.parties().do!(|party| transfer::public_transfer(
+            create_result(
+                object::id(dispute), 
+                dispute.contract(), 
+                dispute.options(), 
+                option::none(), 
+                dispute.parties(), 
+                winner_party,
+                dispute.max_appeals(),
+                ctx
+            ), party)
+        );
+
+        // Destroy the case
+        let DisputeDetails { 
+            dispute_id: _,
+            depositors: _,
+            pool, 
+        } = case;
+
+        pool.destroy_zero();
+
+        // Change status to cancelled
+        dispute.set_status(dispute_status_canceled());
+    };
 }
 
 public fun accept_dispute(
@@ -222,6 +325,8 @@ entry fun open_dispute(
     assert!(fee.value() == self.dispute_fee, EInvalidFee);
     assert!(options.length() >= MIN_OPTIONS && options.length() <= MAX_OPTIONS, EInvalidOptionsAmount);
     assert!(parties.length() == PARTY_COUNT, EInvalidPartyCount);
+    assert!(parties.contains(&ctx.sender()), EInitiatorNotParty);
+    assert!(max_appeals <= MAX_APPEALS, EInvalidAppealCount);
 
     // Allow only 1 dispute to exist at a time per contract instance.
     if(self.cases.contains(contract)) {
@@ -314,6 +419,7 @@ public fun create_court(
         status: Status::Running,
         cases: table::new(ctx),
         stake_pool: balance::zero<NVR>(),
+        reward_pool: balance::zero<SUI>(),
         stakes: linked_table::new(ctx),
         dispute_fee, 
         min_stake,

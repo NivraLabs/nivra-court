@@ -75,7 +75,7 @@ public struct Dispute has key {
     description: String,
     round: u64,
     timetable: TimeTable,
-    max_appeals: u8,                            // 0-5 appeals per case.
+    max_appeals: u8,                            // Max 3 appeals per case.
     appeals_used: u8,
     parties: vector<address>,                   // 2 parties per case.
     evidence: VecMap<address, vector<ID>>,      // Max 3 evidences per party.
@@ -110,6 +110,30 @@ public fun is_evidence_period(dispute: &Dispute, clock: &Clock): bool {
 
 // === View Functions ===
 
+public(package) fun voters_mut(dispute: &mut Dispute): &mut LinkedTable<address, VoterDetails> {
+    &mut dispute.voters
+}
+
+public(package) fun voters(dispute: &Dispute): &LinkedTable<address, VoterDetails> {
+    &dispute.voters
+}
+
+public fun max_appeals(dispute: &Dispute): u8 {
+    dispute.max_appeals
+}
+
+public fun options(dispute: &Dispute): vector<String> {
+    dispute.options
+}
+
+public fun inititator(dispute: &Dispute): address {
+    dispute.initiator
+}
+
+public fun parties(dispute: &Dispute): vector<address> {
+    dispute.parties
+}
+
 public fun contract(dispute: &Dispute): ID {
     dispute.contract
 }
@@ -124,6 +148,10 @@ public fun dispute_id(cap: &PartyCap): ID {
 
 public fun party(cap: &PartyCap): address {
     cap.party
+}
+
+public fun stake(voter_details: &VoterDetails): u64 {
+    voter_details.stake
 }
 
 // === Package Functions ===
