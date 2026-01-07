@@ -31,19 +31,24 @@ use nivra::constants::dispute_status_active;
 use nivra::constants::dispute_status_response;
 use nivra::result::create_result;
 use nivra::constants::dispute_status_canceled;
+use std::u64::pow;
+use std::u64::divide_and_round_up;
 
 // === Constants ===
 const DRAW_STATUS_NOT_ENOUGH_NIVSTERS: u64 = 0;
 const DRAW_STATUS_SUCCESS: u64 = 1;
 // Default dispute rules
-const INIT_NIVSTER_COUNT: u64 = 10;
+const INIT_NIVSTER_COUNT: u64 = 1; // TODO: increase nivster count after testing
+const TIE_NIVSTER_COUNT: u64 = 1;
 const MIN_OPTIONS: u64 = 2;
 const MAX_OPTIONS: u64 = 10;
 const PARTY_COUNT: u64 = 2;
 const MAX_APPEALS: u8 = 3;
+// Dispute creation error event codes
+const NOT_ENOUGH_NIVSTERS_INIT: u64 = 1;
+const EXISTING_DISPUTE: u64 = 2;
 // Dispute error event codes
-const DEEC_NOT_ENOUGH_NIVSTERS_INIT: u64 = 1;
-const DEEC_EXISTING_DISPUTE: u64 = 2;
+const NOT_ENOUGH_NIVSTERS_TIE: u64 = 1;
 
 // === Errors ===
 const EWrongVersion: u64 = 1;
@@ -51,18 +56,11 @@ const ENotUpgrade: u64 = 2;
 const ENotEnoughNVR: u64 = 3;
 const ENotOperational: u64 = 4;
 const EInvalidFee: u64 = 5;
-const EExistingDispute: u64 = 6;
 const ENotResponsePeriod: u64 = 7;
-const EInvalidDispute: u64 = 8;
+const ENoDisputeAccess: u64 = 8;
 const EDisputeNotTie: u64 = 9;
-const EDisputeNotCompleted: u64 = 10;
-const EDisputeCompleted: u64 = 11;
+const ENoAppealsLeft: u64 = 10;
 const EInvalidOptionsAmount: u64 = 12;
-const ENotAppealPeriod: u64 = 13;
-const ENoAppealsLeft: u64 = 14;
-const EDisputeNotTallied: u64 = 15;
-const EDisputeNotError: u64 = 16;
-const ENotPartyMember: u64 = 17;
 const EBalanceMismatchInternal: u64 = 18;
 const ENivsterMismatchInternal: u64 = 19;
 const EWrongParty: u64 = 20;
@@ -70,6 +68,7 @@ const EInvalidPartyCount: u64 = 21;
 const EInitiatorNotParty: u64 = 22;
 const EInvalidAppealCount: u64 = 23;
 const EInvalidLockAmountInternal: u64 = 24;
+const ENotAppealPeriodTallied: u64 = 25;
 
 // === Structs ===
 public enum Status has copy, drop, store {
@@ -122,9 +121,15 @@ public struct WithdrawEvent has copy, drop {
     amount_sui: u64,
 }
 
-public struct DisputeErrorEvent has copy, drop {
+public struct DisputeCreationErrorEvent has copy, drop {
     sender: address,
     contract: ID,
+    error_code: u64,
+}
+
+public struct DisputeErrorEvent has copy, drop {
+    sender: address,
+    dispute_id: ID,
     error_code: u64,
 }
 
@@ -272,6 +277,47 @@ public fun cancel_dispute(
         // Change status to cancelled
         dispute.set_status(dispute_status_canceled());
     };
+
+    // Dispute is incomplete (not tallied or unresolved tie) and fully refunded.
+    if (dispute.is_incomplete(clock)) {
+        let mut case = self.cases.remove(dispute.contract());
+
+        // Refund parties
+        let (address_1, deposit_1) = case.depositors.get_entry_by_idx(0);
+        let (address_2, _) = case.depositors.get_entry_by_idx(1);
+
+        transfer::public_transfer(case.pool.split(*deposit_1).into_coin(ctx), *address_1);
+        transfer::public_transfer(case.pool.withdraw_all().into_coin(ctx), *address_2);
+
+        // Unlock stakes
+        let voters = dispute.voters();
+        let mut i = linked_table::front(voters);
+
+        while(i.is_some()) {
+            let k = *i.borrow();
+            let v = voters.borrow(k);
+            let stake = self.stakes.borrow_mut(k);
+
+            // Failsafe. Should never throw.
+            assert!(stake.locked_amount >= v.stake(), EInvalidLockAmountInternal);
+
+            stake.locked_amount = stake.locked_amount - v.stake();
+            stake.amount = stake.amount + v.stake();
+            i = voters.next(k);
+        };
+
+        // Destroy the case
+        let DisputeDetails { 
+            dispute_id: _,
+            depositors: _,
+            pool, 
+        } = case;
+
+        pool.destroy_zero();
+
+        // Change status to cancelled
+        dispute.set_status(dispute_status_canceled());
+    };
 }
 
 public fun accept_dispute(
@@ -281,19 +327,34 @@ public fun accept_dispute(
     cap: &PartyCap,
     clock: &Clock,
 ) {
-    let self = court.load_inner_mut();
-
     assert!(dispute.is_response_period(clock), ENotResponsePeriod);
-    assert!(fee.value() == self.dispute_fee, EInvalidFee);
-    assert!(object::id(dispute) == cap.dispute_id(), EInvalidDispute);
+    assert!(object::id(dispute) == cap.dispute_id_party(), ENoDisputeAccess);
+
+    let self = court.load_inner_mut();
+    let appeal_count = dispute.appeals_used();
+
+    // Fee = 13^i * Fn / 5^i, where Fn = base dispute fee & i = appeal count.
+    let outstanding_fee = divide_and_round_up(self.dispute_fee * pow(13, appeal_count), pow(5, appeal_count));
+    assert!(fee.value() == outstanding_fee, EInvalidFee);
 
     let dispute_details = self.cases.borrow_mut(dispute.contract());
+    let mut depositors = dispute_details.depositors;
+
+    if (depositors.length() == 2) {
+        // Dispute appeal scenario.
+        let payer_balance = depositors.get_mut(&cap.party());
+        *payer_balance = *payer_balance + fee.value();
+    } else {
+        // Dispute opening scenario. The other party has not made deposits yet.
+        depositors.insert(cap.party(), fee.value());
+    };
 
     // Make sure that the fee is paid by the opposing party.
-    assert!(!dispute_details.depositors.contains(&cap.party()), EWrongParty);
+    let (_, balance) = depositors.get_entry_by_idx(0);
+    let (_, balance_other) = depositors.get_entry_by_idx(1);
+    assert!(balance == balance_other, EWrongParty);
 
-    dispute_details.depositors.insert(cap.party(), fee.value());
-    coin::put(&mut dispute_details.pool, fee);
+    dispute_details.pool.join(fee.into_balance());
 
     // Dispute status is set to active after the other party accepts the case.
     dispute.set_status(dispute_status_active());
@@ -330,10 +391,10 @@ entry fun open_dispute(
 
     // Allow only 1 dispute to exist at a time per contract instance.
     if(self.cases.contains(contract)) {
-        event::emit(DisputeErrorEvent {
+        event::emit(DisputeCreationErrorEvent {
             sender: ctx.sender(),
             contract,
-            error_code: DEEC_EXISTING_DISPUTE,
+            error_code: EXISTING_DISPUTE,
         });
 
         transfer::public_transfer(fee, ctx.sender());
@@ -352,10 +413,10 @@ entry fun open_dispute(
 
     // Not enough nivsters to start a dispute
     if (draw_status == DRAW_STATUS_NOT_ENOUGH_NIVSTERS) {
-        event::emit(DisputeErrorEvent {
+        event::emit(DisputeCreationErrorEvent {
             sender: ctx.sender(),
             contract,
-            error_code: DEEC_NOT_ENOUGH_NIVSTERS_INIT,
+            error_code: NOT_ENOUGH_NIVSTERS_INIT,
         });
 
         nivsters.destroy_empty();
@@ -394,6 +455,77 @@ entry fun open_dispute(
     coin::put(&mut dispute_details.pool, fee);
 
     self.cases.add(contract, dispute_details);
+}
+
+entry fun handle_dispute_tie(
+    court: &mut Court,
+    dispute: &mut Dispute,
+    clock: &Clock,
+    r: &Random,
+    ctx: &mut TxContext,
+) {
+    assert!(dispute.is_appeal_period_tie(clock), EDisputeNotTie);
+
+    let court = court.load_inner_mut();
+    let draw_status = court.draw_nivsters(dispute.voters_mut(), TIE_NIVSTER_COUNT, r, ctx);
+
+    if (draw_status == DRAW_STATUS_NOT_ENOUGH_NIVSTERS) {
+        event::emit(DisputeErrorEvent {
+            sender: ctx.sender(),
+            dispute_id: object::id(dispute),
+            error_code: NOT_ENOUGH_NIVSTERS_TIE,
+        });
+
+        return
+    };
+
+    dispute.start_new_round_tie(clock, ctx);
+}
+
+entry fun open_appeal(
+    court: &mut Court,
+    dispute: &mut Dispute,
+    fee: Coin<SUI>,
+    cap: &PartyCap,
+    clock: &Clock,
+    r: &Random,
+    ctx: &mut TxContext,
+) {
+    assert!(object::id(dispute) == cap.dispute_id_party(), ENoDisputeAccess);
+    assert!(dispute.is_appeal_period_tallied(clock), ENotAppealPeriodTallied);
+    assert!(dispute.has_appeals_left(), ENoAppealsLeft);
+
+    let self = court.load_inner_mut();
+    let appeal_count = dispute.appeals_used() + 1;
+
+    // Fee = 13^i * Fn / 5^i, where Fn = base dispute fee & i = appeal count.
+    let appeal_fee = divide_and_round_up(self.dispute_fee * pow(13, appeal_count), pow(5, appeal_count));
+    assert!(fee.value() == appeal_fee, EInvalidFee);
+
+    // Nivster amount n shall increase to 2n + 1 on every appeal.
+    let nivster_count = dispute.voters().length() + 1;
+    let draw_status = self.draw_nivsters(dispute.voters_mut(), nivster_count, r, ctx);
+
+    // Not enough nivsters for the appeal.
+    if (draw_status == DRAW_STATUS_NOT_ENOUGH_NIVSTERS) {
+        event::emit(DisputeErrorEvent {
+            sender: ctx.sender(),
+            dispute_id: object::id(dispute),
+            error_code: NOT_ENOUGH_NIVSTERS_INIT,
+        });
+
+        transfer::public_transfer(fee, ctx.sender());
+        return
+    };
+
+    // Deposit coins
+    let case = self.cases.borrow_mut(dispute.contract());
+    let deposit = case.depositors.get_mut(&cap.party());
+    *deposit = *deposit + fee.value();
+    case.pool.join(fee.into_balance());
+
+    // Start a new appeal round
+    dispute.start_new_round_appeal(clock, ctx);
 }
 
 // === Admin Functions ===

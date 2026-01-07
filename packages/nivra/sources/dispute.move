@@ -66,10 +66,11 @@ public struct VoterDetails has copy, drop, store {
 
 public struct TimeTable has copy, drop, store {
     round_init_ms: u64,
-    response_period_ms: u64,
+    response_period_ms: u64, // set to 0 on tie rounds to skip the response period.
     evidence_period_ms: u64,
     voting_period_ms: u64,
     appeal_period_ms: u64,
+    response_swap: u64,      // Copy of the response period.
 }
 
 public struct Dispute has key {
@@ -251,7 +252,37 @@ public fun is_appeal_period_tie(dispute: &Dispute, clock: &Clock): bool {
     current_time > appeal_period_start && current_time <= appeal_period_end && dispute.status == dispute_status_tie()
 }
 
+// Dispute ended as completed and is ready for reward distribution.
+public fun is_completed(dispute: &Dispute, clock: &Clock): bool {
+    let tt = dispute.timetable;
+    let timetable_end = tt.round_init_ms + tt.response_period_ms + tt.evidence_period_ms + tt.voting_period_ms + tt.appeal_period_ms;
+    let current_time = clock.timestamp_ms();
+
+    current_time > timetable_end && dispute.status == dispute_status_tallied()
+}
+
+// Dispute ended as uncompleted (votes not tallied or unresolved tie) and is ready be cancelled.
+public fun is_incomplete(dispute: &Dispute, clock: &Clock): bool {
+    let tt = dispute.timetable;
+    let timetable_end = tt.round_init_ms + tt.response_period_ms + tt.evidence_period_ms + tt.voting_period_ms + tt.appeal_period_ms;
+    let current_time = clock.timestamp_ms();
+
+    current_time > timetable_end && (dispute.status == dispute_status_active() || dispute.status == dispute_status_tie())
+}
+
+public fun has_appeals_left(dispute: &Dispute): bool {
+    dispute.appeals_used < dispute.max_appeals
+}
+
 // === View Functions ===
+
+public fun appeals_used(dispute: &Dispute): u8 {
+    dispute.appeals_used
+}
+
+public fun round(dispute: &Dispute): u64 {
+    dispute.round
+}
 
 public(package) fun voters_mut(dispute: &mut Dispute): &mut LinkedTable<address, VoterDetails> {
     &mut dispute.voters
@@ -285,7 +316,11 @@ public fun status(dispute: &Dispute): u64 {
     dispute.status
 }
 
-public fun dispute_id(cap: &PartyCap): ID {
+public fun dispute_id_voter(cap: &VoterCap): ID {
+    cap.dispute_id
+}
+
+public fun dispute_id_party(cap: &PartyCap): ID {
     cap.dispute_id
 }
 
@@ -298,6 +333,50 @@ public fun stake(voter_details: &VoterDetails): u64 {
 }
 
 // === Package Functions ===
+
+public(package) fun start_new_round_appeal(dispute: &mut Dispute, clock: &Clock, ctx: &mut TxContext) {
+    // Start from response period as the opponent is required to make an additional deposit.
+    dispute.status = dispute_status_response();
+    // Use swap value for response period in case a tie round occured in-between and it was zeroed.
+    dispute.timetable.response_period_ms = dispute.timetable.response_swap;
+    dispute.timetable.round_init_ms = clock.timestamp_ms();
+    // Increase round.
+    dispute.round = dispute.round + 1;
+    dispute.appeals_used = dispute.appeals_used + 1;
+    // Reset last round's results.
+    dispute.result = vector[];
+    dispute.winner_option = option::none();
+    dispute.party_result = vector[];
+    dispute.winner_party = option::none();
+
+    // Distribute voter caps to the additional nivsters.
+    let dispute_id = object::id(dispute);
+    distribute_voter_caps(&mut dispute.voters, dispute_id, ctx);
+
+    // Reset nivster's votes.
+    reset_votes(&mut dispute.voters);
+}
+
+public(package) fun start_new_round_tie(dispute: &mut Dispute, clock: &Clock, ctx: &mut TxContext) {
+    // Skip response period as it's not required in tie rounds.
+    dispute.status = dispute_status_active();
+    dispute.timetable.response_period_ms = 0;
+    dispute.timetable.round_init_ms = clock.timestamp_ms();
+    // Increase round.
+    dispute.round = dispute.round + 1;
+    // Reset last round's results.
+    dispute.result = vector[];
+    dispute.winner_option = option::none();
+    dispute.party_result = vector[];
+    dispute.winner_party = option::none();
+
+    // Distribute voter caps to the additional nivsters.
+    let dispute_id = object::id(dispute);
+    distribute_voter_caps(&mut dispute.voters, dispute_id, ctx);
+
+    // Reset nivster's votes.
+    reset_votes(&mut dispute.voters);
+}
 
 public(package) fun tally_votes(dispute: &mut Dispute) {
     // Check winner option.
@@ -405,6 +484,7 @@ public(package) fun create_dispute(
             evidence_period_ms,
             voting_period_ms,
             appeal_period_ms,
+            response_swap: response_period_ms,
         },
         max_appeals,
         appeals_used: 0,
@@ -477,4 +557,20 @@ public(package) fun create_voter_details(stake: u64): VoterDetails {
         decrypted_party_vote: std::option::none(),
         cap_issued: false,
     }
+}
+
+public(package) fun reset_votes(voters: &mut LinkedTable<address, VoterDetails>) {
+    let mut i = linked_table::front(voters);
+
+    while(i.is_some()) {
+        let k = *i.borrow();
+        let v = voters.borrow_mut(k);
+
+        v.vote = option::none();
+        v.decrypted_vote = option::none();
+        v.party_vote = option::none();
+        v.decrypted_party_vote = option::none();
+
+        i = voters.next(k);
+    };
 }

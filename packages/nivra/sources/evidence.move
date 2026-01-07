@@ -8,18 +8,22 @@ use std::string::String;
 use sui::clock::Clock;
 use nivra::dispute::{
     Dispute,
-    PartyCap
+    PartyCap,
+    VoterCap,
 };
 
 // === Errors ===
 
 const EInvalidPartyCap: u64 = 1;
+const EInvalidEvidence: u64 = 2;
+const ENoCaseAccess: u64 = 3;
 
 // === Structs ===
 
 public struct Evidence has key, store {
     id: UID,
     party_cap_id: ID,
+    dispute_id: ID,
     description: String,
     blob_id: Option<String>,      // Walrus blob ID
     file_name: Option<String>,
@@ -29,6 +33,15 @@ public struct Evidence has key, store {
 }
 
 // === Public Functions ===
+
+entry fun seal_approve(
+    id: vector<u8>,
+    evidence: &Evidence,
+    voter_cap: &VoterCap,
+) {
+    assert!(voter_cap.dispute_id_voter() == evidence.dispute_id, ENoCaseAccess);
+    assert!(id == object::id(evidence).to_bytes(), EInvalidEvidence);
+}
 
 public fun create_evidence(
     dispute: &mut Dispute,
@@ -45,6 +58,7 @@ public fun create_evidence(
     let evidence = Evidence {
         id: object::new(ctx),
         party_cap_id: object::id(cap),
+        dispute_id: object::id(dispute),
         description,
         blob_id,
         file_name,
@@ -88,6 +102,7 @@ public fun destroy_evidence(
     let Evidence {
         id,
         party_cap_id: _,
+        dispute_id: _,
         blob_id: _,
         description: _,
         file_name: _,
