@@ -69,6 +69,8 @@ const EInitiatorNotParty: u64 = 22;
 const EInvalidAppealCount: u64 = 23;
 const EInvalidLockAmountInternal: u64 = 24;
 const ENotAppealPeriodTallied: u64 = 25;
+const EDisputeNotCompleted: u64 = 26;
+const ENotEnoughSUI: u64 = 27;
 
 // === Structs ===
 public enum Status has copy, drop, store {
@@ -161,31 +163,51 @@ public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
     });
 }
 
-public fun withdraw(self: &mut Court, ctx: &mut TxContext): (Coin<NVR>, Coin<SUI>) {
+public fun withdraw(
+    self: &mut Court, 
+    amount_nvr: u64,
+    amount_sui: u64,
+    ctx: &mut TxContext,
+): (Coin<NVR>, Coin<SUI>) {
     let self = self.load_inner_mut();
     let sender = ctx.sender();
+    let stake = self.stakes.borrow_mut(sender);
+
+    // Check balances.
+    assert!(stake.amount >= amount_nvr, ENotEnoughNVR);
+    assert!(stake.reward_amount >= amount_sui, ENotEnoughSUI);
+
+    // Deduct amounts.
+    stake.amount = stake.amount - amount_nvr;
+    stake.reward_amount = stake.reward_amount - amount_sui;
+
+    let nvr = self.stake_pool.split(amount_nvr).into_coin(ctx);
+    let sui = self.reward_pool.split(amount_sui).into_coin(ctx);
+
+    // Remove empty balances from the list.
+    if (stake.amount == 0 && stake.locked_amount == 0 && stake.reward_amount == 0) {
+        self.stakes.remove(sender);
+    };
+
+    event::emit(WithdrawEvent { 
+        sender, 
+        amount_nvr,
+        amount_sui,
+    });
     
-    if (self.stakes.contains(sender)) {
-        let stake = self.stakes.remove(sender);
+    (nvr, sui)
+}
 
-        if (stake.locked_amount > 0) {
-            self.stakes.push_back(sender, Stake {
-                amount: 0,
-                locked_amount: stake.locked_amount,
-                reward_amount: 0,
-            });
-        };
+public fun distribute_rewards(
+    court: &mut Court,
+    dispute: &mut Dispute,
+    registry: &CourtRegistry,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    assert!(dispute.is_completed(clock), EDisputeNotCompleted);
 
-        event::emit(WithdrawEvent { 
-            sender, 
-            amount_nvr: stake.amount,
-            amount_sui: stake.reward_amount,
-        });
-
-        (coin::take(&mut self.stake_pool, stake.amount, ctx), coin::take(&mut self.reward_pool, stake.reward_amount, ctx))
-    } else {
-        (coin::zero<NVR>(ctx), coin::zero<SUI>(ctx))
-    }
+    //TODO
 }
 
 public fun cancel_dispute(
