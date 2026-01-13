@@ -10,7 +10,8 @@ const DISPUTE_STATUS_ACTIVE: u64 = 2;
 const DISPUTE_STATUS_TIE: u64 = 3;
 const DISPUTE_STATUS_TALLIED: u64 = 4;
 const DISPUTE_STATUS_COMPLETED: u64 = 5;
-const DISPUTE_STATUS_CANCELED: u64 = 6;
+const DISPUTE_STATUS_COMPLETED_ONE_SIDED: u64 = 6;
+const DISPUTE_STATUS_CANCELLED: u64 = 7;
 
 // === View Functions ===
 /// Returns the current package version.
@@ -38,6 +39,10 @@ public fun dispute_status_completed(): u64 {
     DISPUTE_STATUS_COMPLETED
 }
 
-public fun dispute_status_canceled(): u64 {
-    DISPUTE_STATUS_CANCELED
+public fun dispute_status_completed_one_sided(): u64 {
+    DISPUTE_STATUS_COMPLETED_ONE_SIDED
+}
+
+public fun dispute_status_cancelled(): u64 {
+    DISPUTE_STATUS_CANCELLED
 }

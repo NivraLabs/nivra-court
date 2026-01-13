@@ -110,12 +110,19 @@ public fun treasury_address(self: &CourtRegistry): address {
     self.load_inner().treasury_address
 }
 
+/// Nivra allowed versions.
+public fun allowed_versions(self: &CourtRegistry): VecSet<u64> {
+    let self = self.load_inner();
+
+    self.allowed_versions
+}
+
 // === Admin Functions ===
 /// Validates a `NivraAdminCap` and returns its associated privilege level.
 ///
 /// Aborts if:
 /// - the admin capability is not present in the admin whitelist.
-public fun validate_admin_privileges(self: &mut CourtRegistry, cap: &NivraAdminCap): u64 {
+public fun validate_admin_privileges(self: &CourtRegistry, cap: &NivraAdminCap): u64 {
     let self: &CourtRegistryInner = self.inner.load_value();
 
     assert!(self.admin_whitelist.contains(&object::id(cap)), EAdminCapBlacklisted);
@@ -194,9 +201,14 @@ public fun purge_admin_caps(self: &mut CourtRegistry, cap: &NivraAdminCap, privi
 }
 
 /// Updates the Nivra treasury address.
+/// 
+/// Aborts if:
+/// - The caller’s admin capability is not authorized
+/// - The caller's admin capability is not root
 public fun set_treasury_address(self: &mut CourtRegistry, cap: &NivraAdminCap, treasury_address: address) {
-    self.validate_admin_privileges(cap);
+    let privilege_level = self.validate_admin_privileges(cap);
 
+    assert!(privilege_level == ROOT_PRIVILEGE, ENoPrivileges);
     let self = self.load_inner_mut();
     self.treasury_address = treasury_address;
 }
@@ -242,7 +254,7 @@ public(package) fun unregister_court(self: &mut CourtRegistry, court_id: ID) {
     self.courts.remove(court_id);
 }
 
-// Create metadata for a court.
+/// Create metadata for a court.
 public(package) fun create_metadata(
     category: String,
     name: String,

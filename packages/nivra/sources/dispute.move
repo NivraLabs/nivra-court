@@ -40,6 +40,7 @@ const ENotAppealPeriodUntallied: u64 = 8;
 const ENotEnoughKeys: u64 = 9;
 const EAlreadyFinalized: u64 = 10;
 const EInvalidDispute: u64 = 11;
+const EInvalidDerivedKeyAmount: u64 = 12;
 
 // === Structs ===
 
@@ -56,12 +57,13 @@ public struct VoterCap has key, store {
 }
 
 public struct VoterDetails has copy, drop, store {
-    stake: u64,
+    votes: u64,
     vote: Option<EncryptedObject>,
     decrypted_vote: Option<u8>,
     party_vote: Option<EncryptedObject>,
     decrypted_party_vote: Option<u8>,
     cap_issued: bool,
+    reward_collected: bool,
 }
 
 public struct TimeTable has copy, drop, store {
@@ -98,7 +100,6 @@ public struct Dispute has key {
 }
 
 // === Public Functions ===
-
 public fun finalize_vote(
     dispute: &mut Dispute,
     package_id: address,
@@ -107,7 +108,7 @@ public fun finalize_vote(
     clock: &Clock,
 ) {
     assert!(dispute.is_appeal_period_untallied(clock), ENotAppealPeriodUntallied);
-    assert!(key_servers.length() == derived_keys.length());
+    assert!(key_servers.length() == derived_keys.length(), EInvalidDerivedKeyAmount);
     assert!(derived_keys.length() as u8 >= dispute.threshold, ENotEnoughKeys);
     assert!(dispute.result.length() == 0, EAlreadyFinalized);
 
@@ -139,7 +140,7 @@ public fun finalize_vote(
                 if (decrypted.length() == 1 && decrypted[0] as u64 <= dispute.options.length()) {
                     let option = decrypted[0];
                     v.decrypted_vote = option::some(option);
-                    *&mut result[option as u64] = result[option as u64] + 1;
+                    *&mut result[option as u64] = result[option as u64] + v.votes;
                 }
             });
         });
@@ -151,7 +152,7 @@ public fun finalize_vote(
                 if (decrypted.length() == 1 && decrypted[0] as u64 < dispute.parties.length()) {
                     let option = decrypted[0];
                     v.decrypted_party_vote = option::some(option);
-                    *&mut party_result[option as u64] = party_result[option as u64] + 1;
+                    *&mut party_result[option as u64] = party_result[option as u64] + v.votes;
                 }
             })
         });
@@ -270,11 +271,23 @@ public fun is_incomplete(dispute: &Dispute, clock: &Clock): bool {
     current_time > timetable_end && (dispute.status == dispute_status_active() || dispute.status == dispute_status_tie())
 }
 
+public fun party_failed_payment(dispute: &Dispute, clock: &Clock): bool {
+    !dispute.is_response_period(clock) && dispute.status == dispute_status_response()
+}
+
 public fun has_appeals_left(dispute: &Dispute): bool {
     dispute.appeals_used < dispute.max_appeals
 }
 
 // === View Functions ===
+
+public fun winner_option(dispute: &Dispute): Option<u8> {
+    dispute.winner_option
+}
+
+public fun winner_party(dispute: &Dispute): Option<u8> {
+    dispute.winner_party
+}
 
 public fun appeals_used(dispute: &Dispute): u8 {
     dispute.appeals_used
@@ -308,6 +321,10 @@ public fun parties(dispute: &Dispute): vector<address> {
     dispute.parties
 }
 
+public fun result(dispute: &Dispute): vector<u64> {
+    dispute.result
+}
+
 public fun contract(dispute: &Dispute): ID {
     dispute.contract
 }
@@ -320,6 +337,10 @@ public fun dispute_id_voter(cap: &VoterCap): ID {
     cap.dispute_id
 }
 
+public fun voter(cap: &VoterCap): address {
+    cap.voter
+}
+
 public fun dispute_id_party(cap: &PartyCap): ID {
     cap.dispute_id
 }
@@ -328,11 +349,27 @@ public fun party(cap: &PartyCap): address {
     cap.party
 }
 
-public fun stake(voter_details: &VoterDetails): u64 {
-    voter_details.stake
+public fun votes(voter_details: &VoterDetails): u64 {
+    voter_details.votes
+}
+
+public fun reward_collected(voter_details: &VoterDetails): bool {
+    voter_details.reward_collected
+}
+
+public fun decrypted_vote(voter_details: &VoterDetails): Option<u8> {
+    voter_details.decrypted_vote
 }
 
 // === Package Functions ===
+
+public(package) fun increment_votes(voter_details: &mut VoterDetails) {
+    voter_details.votes = voter_details.votes + 1;
+}
+
+public(package) fun set_reward_collected(voter_details: &mut VoterDetails) {
+    voter_details.reward_collected = true;
+}
 
 public(package) fun start_new_round_appeal(dispute: &mut Dispute, clock: &Clock, ctx: &mut TxContext) {
     // Start from response period as the opponent is required to make an additional deposit.
@@ -515,9 +552,12 @@ public(package) fun distribute_voter_caps(
     dispute_id: ID,
     ctx: &mut TxContext,
 ) {
-    let mut i = linked_table::front(voters);
+    // Iterate the voters list backwards since new nivsters are always
+    // inserted at the back of the list.
+    let mut i = linked_table::back(voters);
+    let mut first_issued_found = false;
 
-    while(i.is_some()) {
+    while(i.is_some() && !first_issued_found) {
         let k = *i.borrow();
         let v = voters.borrow_mut(k);
 
@@ -528,9 +568,11 @@ public(package) fun distribute_voter_caps(
                 dispute_id,
                 voter: k,
             }, k);
+        } else {
+            first_issued_found = true;
         };
 
-        i = voters.next(k);
+        i = voters.prev(k);
     };
 }
 
@@ -548,14 +590,15 @@ public(package) fun distribute_party_caps(
     });
 }
 
-public(package) fun create_voter_details(stake: u64): VoterDetails {
+public(package) fun create_voter_details(): VoterDetails {
     VoterDetails {
-        stake,
+        votes: 1,
         vote: std::option::none(),
         decrypted_vote: std::option::none(),
         party_vote: std::option::none(),
         decrypted_party_vote: std::option::none(),
         cap_issued: false,
+        reward_collected: false,
     }
 }
 

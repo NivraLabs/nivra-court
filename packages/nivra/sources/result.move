@@ -10,16 +10,21 @@ use std::string::String;
 
 public struct Result has key, store {
     id: UID,
+    court_id: ID,
     dispute_id: ID,
     contract_id: ID,
     options: vector<String>,
     winner_option: Option<u8>,
     parties: vector<address>,
-    winner_party: u8,
+    winner_party: u64,
     max_appeals: u8,
 }
 
 // === View Functions ===
+
+public fun court_id(result: &Result): ID {
+    result.court_id
+}
 
 public fun dispute_id(result: &Result): ID {
     result.dispute_id
@@ -41,7 +46,7 @@ public fun parties(result: &Result): vector<address> {
     result.parties
 }
 
-public fun winner_party(result: &Result): u8 {
+public fun winner_party(result: &Result): u64 {
     result.winner_party
 }
 
@@ -52,17 +57,19 @@ public fun max_appeals(result: &Result): u8 {
 // === Package Functions ===
 
 public(package) fun create_result(
+    court_id: ID,
     dispute_id: ID,
     contract_id: ID,
     options: vector<String>,
     winner_option: Option<u8>,
     parties: vector<address>,
-    winner_party: u8,
+    winner_party: u64,
     max_appeals: u8,
     ctx: &mut TxContext,
 ): Result {
     Result {
         id: object::new(ctx),
+        court_id,
         dispute_id,
         contract_id,
         options,

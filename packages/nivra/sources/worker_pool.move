@@ -64,7 +64,7 @@ public(package) fun destroy_empty(self: WorkerPool) {
     assert!(self.length == 0, ENotEmpty);
 
     let WorkerPool {
-        mut id,
+        id,
         length: _,
     } = self;
 
@@ -132,7 +132,7 @@ public(package) fun prefix_sum(self: &WorkerPool, idx: u64): u64 {
 /// the result is incorrect. 
 /// 
 /// Total cumulative sum can be calculated with `prefix_sum()` function
-/// using index `worker_pool.length() - 1`, but is not checked in the runtime to save computing resources.
+/// using index `worker_pool.length() - 1`, but it is not checked in the runtime to save computing resources.
 public(package) fun search(self: &WorkerPool, threshold: u64): u64 {
     let mut sum = 0;
     let mut pos = 0;
