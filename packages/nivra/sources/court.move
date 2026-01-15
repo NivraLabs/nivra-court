@@ -1,4 +1,4 @@
-// © 2025 Nivra Labs Ltd.
+// © 2026 Nivra Labs Ltd.
 
 /// The Court module manages the lifecycle of disputes, including opening,
 /// updating, and resolution.
@@ -16,40 +16,41 @@
 module nivra::court;
 
 // === Imports ===
+use token::nvr::NVR;
+use nivra::{
+    court_registry::{create_metadata, CourtRegistry, NivraAdminCap},
+    constants::{
+        dispute_status_completed_one_sided,
+        dispute_status_cancelled,
+        dispute_status_completed,
+        dispute_status_active,
+        current_version,
+    },
+    worker_pool::{WorkerPool, Self},
+    dispute::{
+        create_voter_details,
+        create_dispute,
+        VoterDetails,
+        Dispute,
+        PartyCap,
+        VoterCap,
+    },
+    result::create_result,
+};
 use std::string::String;
 use sui::{
-    versioned::{Self, Versioned},
-    balance::{Self, Balance},
-    coin::Coin,
-    linked_table::{Self, LinkedTable},
-    table::{Self, Table},
-    random::{Random, new_generator},
+    linked_table::{LinkedTable, borrow_mut, Self},
+    versioned::{Versioned, Self},
+    balance::{Balance, Self},
+    vec_map::{VecMap, Self},
+    vec_set::{VecSet, Self},
+    random::{new_generator, Random},
+    table::{Table, Self},
     clock::Clock,
+    coin::Coin,
     sui::SUI,
-    linked_table::borrow_mut,
     event,
-    vec_map::{Self, VecMap},
-    vec_set::{Self, VecSet},
 };
-use token::nvr::NVR;
-use nivra::court_registry::CourtRegistry;
-use nivra::court_registry::NivraAdminCap;
-use nivra::constants::current_version;
-use nivra::court_registry::create_metadata;
-use nivra::dispute::VoterDetails;
-use nivra::dispute::create_voter_details;
-use nivra::dispute::create_dispute;
-use nivra::dispute::Dispute;
-use nivra::dispute::PartyCap;
-use nivra::constants::dispute_status_active;
-use nivra::result::create_result;
-use std::u64::pow;
-use std::u64::divide_and_round_up;
-use nivra::worker_pool::{Self, WorkerPool};
-use nivra::dispute::VoterCap;
-use nivra::constants::dispute_status_cancelled;
-use nivra::constants::dispute_status_completed_one_sided;
-use nivra::constants::dispute_status_completed;
 
 // === Constants ===
 // Sanction models
@@ -60,17 +61,17 @@ const QUADRATIC_MODEL: u64 = 2;
 const INIT_NIVSTER_COUNT: u64 = 1;
 const TIE_NIVSTER_COUNT: u64 = 1;
 const MIN_OPTIONS: u64 = 2;
-const MAX_OPTIONS: u64 = 10;
+const MAX_OPTIONS: u64 = 5;
 const PARTY_COUNT: u64 = 2;
 const MAX_APPEALS: u8 = 3;
+const MAX_DESCRIPTION_LEN: u64 = 2000;
+const MAX_OPTION_LEN: u64 = 50;
 
 // === Errors ===
 const EWrongVersion: u64 = 1;
-const ENotEnoughNVR: u64 = 3;
 const ENotResponsePeriod: u64 = 7;
 const EBalanceMismatchInternal: u64 = 18;
 const EDisputeNotCompleted: u64 = 26;
-const ENotEnoughSUI: u64 = 27;
 const ENoWithdrawAmount: u64 = 28;
 const EAlreadyInWorkerPool: u64 = 29;
 const ENotInWorkerPool: u64 = 30;
@@ -83,6 +84,38 @@ const EInvalidTreasuryShareInternal: u64 = 36;
 const EInvalidSanctionModelInternal: u64 = 37;
 const EInvalidCoefficientInternal: u64 = 38;
 const EInvalidVoterCap: u64 = 39;
+const EZeroMinStakeInternal: u64 = 40;
+const EInvalidThresholdInternal: u64 = 41;
+const EInvalidKeyConfigInternal: u64 = 42;
+const EAppealsOverflowInternal: u64 = 43;
+
+#[error]
+const EOptionTooLong: vector<u8> =
+b"Each voting option must be at most 50 bytes long.";
+
+#[error]
+const EDescriptionTooLong: vector<u8> =
+b"The dispute description must be at most 2000 bytes long.";
+
+#[error]
+const EDuplicateOptions: vector<u8> = 
+b"Voting options must be unique.";
+
+#[error]
+const ENoStake: vector<u8> = 
+b"Caller has no stake in the court.";
+
+#[error]
+const EDepositUnderMinStake: vector<u8> =
+b"Deposit amount is below the court's minimum required stake.";
+
+#[error]
+const ENotEnoughNVR: vector<u8> =
+b"Insufficient NVR balance to complete the withdrawal.";
+
+#[error]
+const ENotEnoughSUI: vector<u8> =
+b"Insufficient SUI balance to complete the withdrawal.";
 
 #[error]
 const ENotOperational: vector<u8> =
@@ -102,7 +135,7 @@ b"The caller must be a party to the dispute.";
 
 #[error]
 const EInvalidOptionsAmount: vector<u8> =
-b"The dispute must contain between 2 and 10 options.";
+b"The dispute must contain between 2 and 5 options.";
 
 #[error]
 const EInvalidPartyCount: vector<u8> =
@@ -137,23 +170,59 @@ const EDisputeNotTie: vector<u8> =
 b"Dispute outcome is not tied.";
 
 // === Structs ===
+/// Court operational status.
+/// 
+/// - `Running`: The court is fully operational.
+/// - `Halted`: The court is temporarily closed. User actions such as staking, 
+///    joining the worker pool, and opening disputes are disabled.
 public enum Status has copy, drop, store {
     Running,
     Halted,
 }
 
+/// Per-user staking state within a court.
+///
+/// Tracks the user's deposited stake, locked stake committed to active cases,
+/// accumulated rewards, and worker pool participation status.
+/// 
+/// Fields:
+/// - `amount`: Available NVR stake not currently locked in disputes.
+///    The `amount` must always match the worker pool amount. Denominated
+///    in the smallest unit of NVR (1e-6 NVR).
+/// - `locked_amount`: NVR stake locked as collateral for active cases.
+///    Denominated in the smallest unit of NVR (1e-6 NVR).
+/// - `reward_amount`: Accumulated rewards denominated in MIST.
+/// - `in_worker_pool`: Whether the user is currently enrolled in the worker 
+///    pool.
 public struct Stake has drop, store {
-    amount: u64,          // NVR
-    locked_amount: u64,   // NVR
-    reward_amount: u64,   // SUI
+    amount: u64,
+    locked_amount: u64,
+    reward_amount: u64,
     in_worker_pool: bool,
 }
 
+/// Per-contract dispute data.
+/// 
+/// Fields:
+/// - `dispute_id`: Unique identifier of the dispute case.
+/// - `depositors`: Mapping of dispute parties to the amount of SUI
+///    they have deposited for fees and appeals, denominated in MIST.
 public struct DisputeDetails has drop, store {
     dispute_id: ID,
-    depositors: VecMap<address, u64>, // Amount per address
+    depositors: VecMap<address, u64>,
 }
 
+/// Default dispute timeline parameters provided by the court.
+/// 
+/// Fields:
+/// - `default_response_period_ms`: Time window during which the opposing party
+///    must respond by matching the dispute opening or appeal fee.
+/// - `default_evidence_period_ms`: Time window during which parties may submit
+///    evidence for the dispute.
+/// - `default_voting_period_ms`: Time window during which nivsters may cast 
+///    votes.
+/// - `default_appeal_period_ms`: Time window for tallying votes and submitting
+///    an appeal against the result.
 public struct DefaultTimeTable has drop, store {
     default_response_period_ms: u64,
     default_evidence_period_ms: u64,
@@ -161,11 +230,48 @@ public struct DefaultTimeTable has drop, store {
     default_appeal_period_ms: u64,
 }
 
+/// Versioned wrapper for the Court.
+///
+/// This struct enables safe upgrades of the court by encapsulating versioned 
+/// internal state.
 public struct Court has key {
     id: UID,
     inner: Versioned,
 }
 
+/// Internal state of the Court.
+/// 
+/// Contains all configuration parameters, economic settings, participant
+/// state, and active dispute tracking required for court operation.
+/// 
+/// Fields:
+/// - `allowed_versions`: A list of allowed nivra package versions.
+/// - `status`: Current operational status of the court.
+/// - `ai_court`: Whether the court is classified as an AI-specific court.
+/// - `sanction_model`: Identifier of the sanction model applied by the court.
+/// - `coefficient`: Model-specific coefficient used by the sanction model,
+///    expressed as a percentage (scaled by 100).
+/// - `treasury_share`: Share of SUI rewards allocated to the Nivra treasury,
+///    expressed as a percentage (scaled by 100).
+/// - `treasury_share_nvr`: Share of NVR rewards allocated to the Nivra treasury
+///    , expressed as a percentage (scaled by 100).
+/// - `empty_vote_penalty`: Penalty applied for failing to submit a vote,
+///    expressed as a percentage (scaled by 100).
+/// - `dispute_fee`: Fee required to open a dispute, denominated in MIST.
+/// - `min_stake`: Minimum NVR stake required to participate as a nivster.
+///    Denominated in the smallest unit of NVR (1e-6 NVR).
+/// - `timetable`: Default dispute timing parameters used when a case does not
+///    override its timeline.
+/// - `cases`: Mapping of contract IDs to mapping of serialized dispute config
+///    to dispute data. Prevents duplicate disputes for the same contract.
+///    Use `serialize_dispute_config` to get the serialized dispute config.
+/// - `stakes`: Per-user stake records maintained by the court.
+/// - `worker_pool`: Pool of eligible nivsters available for case assignment.
+/// - `stake_pool`: Custody balance holding all staked NVR tokens.
+/// - `reward_pool`: Custody balance holding all deposited SUI fees and rewards.
+/// - `key_servers`: Seal key servers used in disputes.
+/// - `public_keys`: Seal public keys corresponding the key servers.
+/// - `threshold`: Encryption threshold (t of n key servers) for disputes.
 public struct CourtInner has store {
     allowed_versions: VecSet<u64>,
     status: Status,
@@ -178,55 +284,103 @@ public struct CourtInner has store {
     dispute_fee: u64,
     min_stake: u64,
     timetable: DefaultTimeTable,
-    cases: Table<ID, DisputeDetails>,
+    cases: Table<ID, VecMap<vector<u8>, DisputeDetails>>,
     stakes: LinkedTable<address, Stake>,
     worker_pool: WorkerPool,
     stake_pool: Balance<NVR>,
     reward_pool: Balance<SUI>,
+    key_servers: vector<address>,
+    public_keys: vector<vector<u8>>,
+    threshold: u8,
 }
 
 // === Events ===
 
 public struct StakeEvent has copy, drop {
-    sender: address,
     amount: u64,
 }
 
 public struct WithdrawEvent has copy, drop {
-    sender: address,
     amount_nvr: u64,
     amount_sui: u64,
 }
 
+public struct WorkerPoolEntryEvent has copy, drop {}
+
+public struct WorkerPoolDepartEvent has copy, drop {}
+
+public struct DisputeCreationEvent has copy, drop {
+    dispute_id: ID,
+    contract_id: ID,
+    court_id: ID,
+    fee: u64,
+    max_appeals: u8,
+    description: String,
+    parties: vector<address>,
+    options: vector<String>,
+    response_period_ms: u64,
+    evidence_period_ms: u64,
+    voting_period_ms: u64,
+    appeal_period_ms: u64,
+}
+
+public struct DisputeAppealEvent has copy, drop {
+    dispute_id: ID,
+    initiator_party: address,
+    fee: u64,
+}
+
+public struct DisputeAcceptEvent has copy, drop {
+    dispute_id: ID,
+    accepting_party: address,
+    fee: u64,
+}
+
+public struct DisputeTieEvent has copy, drop {
+    dispute_id: ID,
+}
+
+public struct DisputeCancelEvent has copy, drop {
+    dispute_id: ID,
+}
+
 // === Public Functions ===
-/// Adds NVR stake to the court’s stake pool.
+/// Adds stake to the court.
+/// 
+/// The deposited NVR is added to the court’s stake pool and credited to the
+/// caller’s available stake. If the caller is already enrolled in the worker
+/// pool, their worker pool stake weight is automatically increased to reflect
+/// the additional deposit.
 /// 
 /// Aborts if:
 /// - The court is not in the `Running` state
 /// - The deposited stake amount is less than the minimum required stake
+/// 
+/// Emits:
+/// - `StakeEvent` recording the sender and staked amount
 public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
     let self = self.load_inner_mut();
-    let amount = assets.value();
+    let deposit_amount = assets.value();
 
     assert!(self.status == Status::Running, ENotOperational);
-    assert!(amount >= self.min_stake, ENotEnoughNVR);
+    assert!(deposit_amount >= self.min_stake, EDepositUnderMinStake);
 
     self.stake_pool.join(assets.into_balance());
     let sender = ctx.sender();
 
     if (self.stakes.contains(sender)) {
         let stake = self.stakes.borrow_mut(sender);
-        stake.amount = stake.amount + amount;
+        stake.amount = stake.amount + deposit_amount;
 
         // If the user is enrolled in the worker pool, automatically
         // increase the worker pool stake.
         if (stake.in_worker_pool) {
             let i = self.worker_pool.index_by_address(sender).extract();
-            self.worker_pool.add_stake(i, amount);
+            self.worker_pool.add_stake(i, deposit_amount);
         };
     } else {
         self.stakes.push_back(sender, Stake {
-            amount,
+            amount: deposit_amount,
             locked_amount: 0,
             reward_amount: 0,
             in_worker_pool: false,
@@ -234,17 +388,27 @@ public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
     };
 
     event::emit(StakeEvent { 
-        sender, 
-        amount, 
+        amount: deposit_amount, 
     });
 }
 
 
-/// Withdraws NVR stake and/or SUI rewards from the court.
+/// Withdraws available NVR stake and/or accumulated SUI rewards from the court.
+/// 
+/// The caller may withdraw either or both assets in a single transaction.
+/// Withdrawn NVR is deducted from the caller’s available (unlocked) stake,
+/// while withdrawn SUI is deducted from accumulated rewards.
+/// 
+/// If the caller is enrolled in the worker pool, the worker pool stake is
+/// automatically updated. If the remaining NVR stake falls below the court’s
+/// minimum stake requirement, the caller is removed from the worker pool.
 /// 
 /// Aborts if:
 /// - The caller does not have sufficient NVR stake or SUI rewards
 /// - Both withdrawal amounts are zero
+/// 
+/// Emits:
+/// - `WithdrawEvent` recording the caller and withdrawn amounts
 public fun withdraw(
     self: &mut Court, 
     amount_nvr: u64,
@@ -266,7 +430,7 @@ public fun withdraw(
 
     // Automatically update worker pool stake or remove the caller
     // if the remaining stake falls below the minimum threshold.
-    if (stake.in_worker_pool) {
+    if (stake.in_worker_pool && amount_nvr > 0) {
         let i = self.worker_pool.index_by_address(sender).extract();
 
         if (stake.amount < self.min_stake) {
@@ -280,8 +444,7 @@ public fun withdraw(
     let nvr = self.stake_pool.split(amount_nvr).into_coin(ctx);
     let sui = self.reward_pool.split(amount_sui).into_coin(ctx);
 
-    event::emit(WithdrawEvent { 
-        sender, 
+    event::emit(WithdrawEvent {
         amount_nvr,
         amount_sui,
     });
@@ -293,12 +456,19 @@ public fun withdraw(
 /// 
 /// Aborts if:
 /// - The court is not in the `Running` state
+/// - The user does not have a stake in the court.
 /// - The caller does not have the minimum required stake
 /// - The caller is already enrolled in the worker pool
 /// - The worker pool has reached its maximum capacity
+/// 
+/// Emits:
+/// - `WorkerPoolEntryEvent` recording the caller's entry to the worker pool
 public fun join_worker_pool(self: &mut Court, ctx: &mut TxContext) {
     let self = self.load_inner_mut();
     let sender = ctx.sender();
+
+    assert!(self.stakes.contains(sender), ENoStake);
+
     let stake = self.stakes.borrow_mut(sender);
 
     assert!(self.status == Status::Running, ENotOperational);
@@ -307,15 +477,24 @@ public fun join_worker_pool(self: &mut Court, ctx: &mut TxContext) {
 
     self.worker_pool.push_back(sender, stake.amount);
     stake.in_worker_pool = true;
+
+    event::emit(WorkerPoolEntryEvent {});
 }
 
 /// Removes the caller from the worker pool while retaining their stake.
 /// 
 /// Aborts if:
 /// - The caller is not currently enrolled in the worker pool
+/// - The user does not have a stake in the court.
+/// 
+/// Emits:
+/// - `WorkerPoolDepartEvent` recording the caller's exit from the worker pool
 public fun leave_worker_pool(self: &mut Court, ctx: &mut TxContext) {
     let self = self.load_inner_mut();
     let sender = ctx.sender();
+
+    assert!(self.stakes.contains(sender), ENoStake);
+
     let stake = self.stakes.borrow_mut(sender);
 
     assert!(stake.in_worker_pool, ENotInWorkerPool);
@@ -323,6 +502,8 @@ public fun leave_worker_pool(self: &mut Court, ctx: &mut TxContext) {
     let i = self.worker_pool.index_by_address(sender).extract();
     self.worker_pool.swap_remove(i);
     stake.in_worker_pool = false;
+
+    event::emit(WorkerPoolDepartEvent {});
 }
 
 /// Opens a new dispute in the specified court for a given contract.
@@ -332,9 +513,8 @@ public fun leave_worker_pool(self: &mut Court, ctx: &mut TxContext) {
 /// An initial set of jurors ("nivsters") is randomly selected from the worker
 /// pool using stake-weighted selection.
 /// 
-/// 
-/// The caller must be one of the dispute parties. Only one dispute may exist
-/// per contract at any given time.
+/// The caller must be one of the dispute parties. Only one dispute with same
+/// configs may exist per contract at any given time.
 /// 
 /// Aborts if:
 /// - The court is not in the `Running` state
@@ -343,8 +523,16 @@ public fun leave_worker_pool(self: &mut Court, ctx: &mut TxContext) {
 /// - The number of parties is not exactly two
 /// - The caller is not one of the dispute parties
 /// - The maximum number of appeals exceeds the court’s limit
-/// - A dispute has already been opened for the specified contract ID
-/// - The worker pool does not contain enough eligible nivsters to initialize the case
+/// - A dispute has already been opened for the contract ID with specified 
+///   configs
+/// - The worker pool does not contain enough eligible nivsters to initialize 
+///   the case
+/// - The description length is too long
+/// - The option length is too long
+/// - The options are not unique
+/// 
+/// Emits:
+/// - `DisputeCreationEvent` recording the creation of a new dispute
 entry fun open_dispute(
     court: &mut Court,
     fee: Coin<SUI>,
@@ -353,13 +541,6 @@ entry fun open_dispute(
     parties: vector<address>,
     options: vector<String>,
     max_appeals: u8,
-    response_period_ms: Option<u64>,
-    evidence_period_ms: Option<u64>,
-    voting_period_ms: Option<u64>,
-    appeal_period_ms: Option<u64>,
-    key_servers: vector<address>,
-    public_keys: vector<vector<u8>>,
-    threshold: u8,
     r: &Random,
     clock: &Clock, 
     ctx: &mut TxContext
@@ -370,17 +551,41 @@ entry fun open_dispute(
     assert!(self.status == Status::Running, ENotOperational);
     assert!(fee.value() == self.dispute_fee, EInvalidFee);
     // Enforce the dispute limitations.
-    assert!(options.length() >= MIN_OPTIONS && options.length() <= MAX_OPTIONS, EInvalidOptionsAmount);
+    assert!(
+        options.length() >= MIN_OPTIONS && options.length() <= MAX_OPTIONS, 
+        EInvalidOptionsAmount
+    );
     assert!(parties.length() == PARTY_COUNT, EInvalidPartyCount);
+    assert!(parties[0] != parties[1], EInvalidPartyCount);
     assert!(parties.contains(&ctx.sender()), EInitiatorNotParty);
     assert!(max_appeals <= MAX_APPEALS, EInvalidAppealCount);
-    assert!(!self.cases.contains(contract), EDisputeAlreadyExists);
+    assert!(description.length() <= MAX_DESCRIPTION_LEN, EDescriptionTooLong);
 
-    // Unwrap dispute timetable or use court defaults if not specified.
-    let response_period = response_period_ms.destroy_or!(self.timetable.default_response_period_ms);
-    let evidence_period = evidence_period_ms.destroy_or!(self.timetable.default_evidence_period_ms);
-    let voting_period = voting_period_ms.destroy_or!(self.timetable.default_voting_period_ms);
-    let appeal_period = appeal_period_ms.destroy_or!(self.timetable.default_appeal_period_ms);
+    // Check if all the options are unique and less than the max length.
+    let mut i = 0;
+
+    while(i < options.length()) {
+        let mut j = i + 1;
+        assert!(options[i].length() <= MAX_OPTION_LEN, EOptionTooLong);
+
+        while (j < options.length()) {
+            assert!(options[i] != options[j], EDuplicateOptions);
+            j = j + 1;
+        };
+        i = i + 1;
+    };
+
+    let serialized_config = serialize_dispute_config(
+        contract, 
+        parties, 
+        options, 
+        max_appeals
+    );
+
+    assert!(
+        !dispute_exists_for_contract(self, contract, &serialized_config), 
+        EDisputeAlreadyExists
+    );
 
     // Draw initial nivsters to the case.
     let mut nivsters = linked_table::new(ctx);
@@ -391,17 +596,24 @@ entry fun open_dispute(
         contract,
         court_id,
         description,
-        response_period,
-        evidence_period, 
-        voting_period, 
-        appeal_period, 
+        self.timetable.default_response_period_ms,
+        self.timetable.default_evidence_period_ms, 
+        self.timetable.default_voting_period_ms, 
+        self.timetable.default_appeal_period_ms, 
         max_appeals, 
         parties, 
         nivsters, 
         options, 
-        key_servers, 
-        public_keys, 
-        threshold,
+        self.key_servers, 
+        self.public_keys, 
+        self.threshold,
+        serialized_config,
+        self.dispute_fee,
+        self.sanction_model,
+        self.coefficient,
+        self.treasury_share,
+        self.treasury_share_nvr,
+        self.empty_vote_penalty,
         clock, 
         ctx
     );
@@ -413,8 +625,31 @@ entry fun open_dispute(
     };
 
     dispute_details.depositors.insert(ctx.sender(), fee.value());
+
+    if (!self.cases.contains(contract)) {
+        self.cases.add(contract, vec_map::empty());
+    };
+
+    self.cases
+    .borrow_mut(contract)
+    .insert(serialized_config, dispute_details);
+
+    event::emit(DisputeCreationEvent {
+        dispute_id,
+        contract_id: contract,
+        court_id,
+        fee: fee.value(),
+        max_appeals,
+        description,
+        parties,
+        options,
+        response_period_ms: self.timetable.default_response_period_ms,
+        evidence_period_ms: self.timetable.default_evidence_period_ms,
+        voting_period_ms: self.timetable.default_voting_period_ms,
+        appeal_period_ms: self.timetable.default_appeal_period_ms,
+    });
+
     self.reward_pool.join(fee.into_balance());
-    self.cases.add(contract, dispute_details);
 }
 
 /// Starts a new appeal round for an existing dispute.
@@ -429,8 +664,8 @@ entry fun open_dispute(
 /// - `N` is the initial juror count
 /// - `T` is the number of additional jurors drawn due to tie resolutions
 /// 
-/// The appeal fee `F` grows exponentially with each round `i` and must be paid by
-/// an authorized dispute party to initiate the appeal:
+/// The appeal fee `F` grows exponentially with each round `i` and must be paid 
+/// by an authorized dispute party to initiate the appeal:
 /// 
 /// `F = (13/5)^i * Fn`
 /// 
@@ -443,6 +678,9 @@ entry fun open_dispute(
 /// - The dispute is not in a state where appeals are allowed
 /// - The dispute has reached the maximum number of appeals
 /// - The worker pool does not contain enough eligible jurors to extend the case
+/// 
+/// Emits:
+/// - `DisputeAppealEvent` recording the start of an appeal round
 entry fun open_appeal(
     court: &mut Court,
     dispute: &mut Dispute,
@@ -453,6 +691,7 @@ entry fun open_appeal(
     ctx: &mut TxContext,
 ) {
     assert!(object::id(dispute) == cap.dispute_id_party(), EInvalidPartyCap);
+    assert!(dispute.parties().contains(&cap.party()), EInvalidPartyCap);
     assert!(dispute.is_appeal_period_tallied(clock), ENotAppealPeriodTallied);
     assert!(dispute.has_appeals_left(), ENoAppealsLeft);
 
@@ -460,22 +699,37 @@ entry fun open_appeal(
     let appeal_count = dispute.appeals_used() + 1;
 
     // Fee = 13^i * Fn / 5^i, where Fn = base dispute fee & i = appeal count.
-    let appeal_fee = divide_and_round_up(self.dispute_fee * pow(13, appeal_count), pow(5, appeal_count));
-    assert!(fee.value() == appeal_fee, EInvalidFee);
+    // The appeal count is hard capped at 3.
+    let appeal_fee = std::u128::divide_and_round_up(
+        dispute.dispute_fee() as u128 * std::u128::pow(13, appeal_count), 
+        std::u128::pow(5, appeal_count)
+    );
+    assert!(fee.value() == appeal_fee as u64, EInvalidFee);
 
-    // Increment amount = 2^(i-1) * (N + 1), where N = initial nivster count & i = appeal count.
-    let nivster_count = pow(2, appeal_count - 1) * (INIT_NIVSTER_COUNT + 1);
+    // Increment amount = 2^(i-1) * (N + 1), where N = initial nivster count 
+    // & i = appeal count.
+    let nivster_count = std::u64::pow(2, appeal_count - 1) * 
+    (INIT_NIVSTER_COUNT + 1);
     self.draw_nivsters(dispute.voters_mut(), nivster_count, r, ctx);
 
-    // Deposit coins
     let case = self.cases.borrow_mut(dispute.contract());
-    let deposit = case.depositors.get_mut(&cap.party());
+    // Both depositors must exist by now since appeal can be only raised after
+    // a successful round, where both parties have made a deposit.
+    let deposit = case.get_mut(dispute.serialized_config())
+    .depositors
+    .get_mut(&cap.party());
     *deposit = *deposit + fee.value();
-
-    self.reward_pool.join(fee.into_balance());
 
     // Start a new appeal round
     dispute.start_new_round_appeal(clock, ctx);
+
+    event::emit(DisputeAppealEvent { 
+        dispute_id: object::id(dispute), 
+        initiator_party: cap.party(),
+        fee: fee.value(),
+    });
+
+    self.reward_pool.join(fee.into_balance());
 }
 
 /// Accepts an open dispute or appeal by the opposing party and deposits
@@ -498,6 +752,9 @@ entry fun open_appeal(
 /// - The dispute is not in a response period
 /// - The fee amount is incorrect
 /// - The fee is paid by the wrong party
+/// 
+/// Emits:
+/// - `DisputeAcceptEvent` recording the dispute accept
 public fun accept_dispute(
     court: &mut Court,
     dispute: &mut Dispute,
@@ -507,35 +764,49 @@ public fun accept_dispute(
 ) {
     assert!(dispute.is_response_period(clock), ENotResponsePeriod);
     assert!(object::id(dispute) == cap.dispute_id_party(), EInvalidPartyCap);
+    assert!(dispute.parties().contains(&cap.party()), EInvalidPartyCap);
 
     let self = court.load_inner_mut();
     let appeal_count = dispute.appeals_used();
 
     // Fee = 13^i * Fn / 5^i, where Fn = base dispute fee & i = appeal count.
-    let outstanding_fee = divide_and_round_up(self.dispute_fee * pow(13, appeal_count), pow(5, appeal_count));
-    assert!(fee.value() == outstanding_fee, EInvalidFee);
+    let outstanding_fee = std::u128::divide_and_round_up(
+        dispute.dispute_fee() as u128 * std::u128::pow(13, appeal_count), 
+        std::u128::pow(5, appeal_count)
+    );
+    assert!(fee.value() == outstanding_fee as u64, EInvalidFee);
 
-    let dispute_details = self.cases.borrow_mut(dispute.contract());
-    let mut depositors = dispute_details.depositors;
+    let case = self.cases.borrow_mut(dispute.contract());
+    let depositors = &mut case
+    .get_mut(dispute.serialized_config())
+    .depositors;
 
     if (depositors.length() == 2) {
         // Dispute appeal scenario.
         let payer_balance = depositors.get_mut(&cap.party());
+        
         *payer_balance = *payer_balance + fee.value();
+
+        let (_, balance_1) = depositors.get_entry_by_idx(0);
+        let (_, balance_2) = depositors.get_entry_by_idx(1);
+
+        assert!(*balance_1 == *balance_2, EWrongParty);
     } else {
+        assert!(!depositors.contains(&cap.party()), EWrongParty);
         // Dispute opening scenario. The other party has not made deposits yet.
         depositors.insert(cap.party(), fee.value());
     };
 
-    // Make sure that the fee is paid by the opposing party.
-    let (_, balance) = depositors.get_entry_by_idx(0);
-    let (_, balance_other) = depositors.get_entry_by_idx(1);
-    assert!(balance == balance_other, EWrongParty);
-
-    self.reward_pool.join(fee.into_balance());
-
     // Dispute status is set to active after the other party accepts the case.
     dispute.set_status(dispute_status_active());
+
+    event::emit(DisputeAcceptEvent {
+        dispute_id: object::id(dispute),
+        accepting_party: cap.party(),
+        fee: fee.value(),
+    });
+
+    self.reward_pool.join(fee.into_balance());
 }
 
 /// Handles dispute ties by drawing more nivsters and starting a new round.
@@ -543,6 +814,9 @@ public fun accept_dispute(
 /// Aborts if:
 /// - Dispute is not in a tie period
 /// - The worker pool does not contain enough eligible jurors to extend the case
+/// 
+/// Emits:
+/// - `DisputeTieEvent` recording the start of a tie round
 entry fun handle_dispute_tie(
     court: &mut Court,
     dispute: &mut Dispute,
@@ -555,15 +829,23 @@ entry fun handle_dispute_tie(
     let court = court.load_inner_mut();
     court.draw_nivsters(dispute.voters_mut(), TIE_NIVSTER_COUNT, r, ctx);
     dispute.start_new_round_tie(clock, ctx);
+
+    event::emit(DisputeTieEvent { 
+        dispute_id: object::id(dispute), 
+    });
 }
 
 /// Cancels a failed or abandoned dispute.
 /// 
-/// A dispute may be cancelled if it fails to progress to completion
-/// (e.g. votes are not counted or a tie is not resolved within the allowed time window).
+/// Anyone may cancel the dispute if it fails to progress to completion
+/// (e.g. votes are not counted or a tie is not resolved within the allowed time
+///  window).
 /// 
 /// Aborts if:
 /// - The dispute is not in a cancellable (incomplete) state
+/// 
+/// Emits:
+/// - `DisputeCancelEvent` recording the dispute cancellation
 public fun cancel_dispute(
     dispute: &mut Dispute,
     court: &mut Court,
@@ -571,18 +853,34 @@ public fun cancel_dispute(
     ctx: &mut TxContext,
 ) {
     assert!(dispute.is_incomplete(clock), EDisputeNotCancellable);
-    dispute.set_status(dispute_status_cancelled());
 
     let self = court.load_inner_mut();
-    // Remove the case from the case map, so a new case can be opened for the contract.
-    let dispute_details = self.cases.remove(dispute.contract());
+    // Remove the case from the case map, so a new case can be opened 
+    // for the contract.
+    let (_, dispute_details) = self.cases
+    .borrow_mut(dispute.contract())
+    .remove(dispute.serialized_config());
 
-    // Refund the parties in full.
-    let (depositor_1, amount_1) = dispute_details.depositors.get_entry_by_idx(0);
-    let (depositor_2, amount_2) = dispute_details.depositors.get_entry_by_idx(1);
+    // Refund parties in full.
+    let mut i = 0;
 
-    transfer::public_transfer(self.reward_pool.split(*amount_1).into_coin(ctx), *depositor_1);
-    transfer::public_transfer(self.reward_pool.split(*amount_2).into_coin(ctx), *depositor_2);
+    while (i < dispute_details.depositors.length()) {
+        let (addr, amount) = dispute_details.depositors
+        .get_entry_by_idx(i);
+
+        transfer::public_transfer(
+            self.reward_pool.split(*amount).into_coin(ctx),
+            *addr
+        );
+
+        i = i + 1;
+    };
+
+    dispute.set_status(dispute_status_cancelled());
+
+    event::emit(DisputeCancelEvent { 
+        dispute_id: object::id(dispute),
+    });
 }
 
 /// Resolves a one-sided dispute where one party failed to pay the required
@@ -602,22 +900,37 @@ public fun resolve_one_sided_dispute(
     ctx: &mut TxContext,
 ) {
     assert!(dispute.party_failed_payment(clock), EDisputeNotOneSided);
-    dispute.set_status(dispute_status_completed_one_sided());
 
     let court_id = object::id(court);
     let self = court.load_inner_mut();
-    let dispute_details = self.cases.borrow(dispute.contract());
 
-    // Refund the winner.
-    let (mut winner_party, mut winner_amount) = dispute_details.depositors.get_entry_by_idx(0);
-    let (party_2, amount_2) = dispute_details.depositors.get_entry_by_idx(1);
+    // The case is left to the case map intentionally, so that another case
+    // can't be opened for the contract with same configurations.
+    let dispute_details = self.cases.borrow(dispute.contract())
+    .get(dispute.serialized_config());
 
-    if (*amount_2 > *winner_amount) {
-        winner_party = party_2;
-        winner_amount = amount_2;
+    // At least 1 party has made a deposit at this point.
+    let (mut refund_party, mut refund_amount) = dispute_details.depositors
+    .get_entry_by_idx(0);
+
+    // Check if the counter party has made a deposit greater than the first 
+    // party.
+    if (dispute_details.depositors.length() == 2) {
+        let (party_2, amount_2) = dispute_details.depositors
+        .get_entry_by_idx(1);
+
+        if (*amount_2 > *refund_amount) {
+            refund_party = party_2;
+            refund_amount = amount_2;
+        };
     };
 
-    transfer::public_transfer(self.reward_pool.split(*winner_amount).into_coin(ctx), *winner_party);
+    // Refund the party with the most deposits.
+    transfer::public_transfer(
+        self.reward_pool.split(*refund_amount).into_coin(ctx), 
+        *refund_party
+    );
+
     // Send the result to both parties.
     dispute.parties().do!(|party| transfer::public_transfer(create_result(
         court_id, 
@@ -627,45 +940,32 @@ public fun resolve_one_sided_dispute(
         option::none(), 
         dispute.parties(), 
         dispute.parties()
-        .find_index!(|addr| addr == *winner_party)
+        .find_index!(|addr| addr == *refund_party)
         .extract(), 
         dispute.max_appeals(), 
         ctx
     ), party));
 
-    // Distribute protocol fees to the treasury.
-    let appeal_count = dispute.appeals_used();
-    let voter_count = dispute.voters().length();
-
-    if (appeal_count >= 1) {
-        // if appeals = 1, then the party has paid the dispute opening fee.
-        let base_cut = self.dispute_fee * (100 - self.treasury_share) / 100;
-        let mut total_cut = self.dispute_fee * self.treasury_share / 100;
-        let mut appeal_round = appeal_count;
-
-        // if appeals > 1, then the party has also paid for appeal rounds.
-        while (appeal_round > 1) {
-            appeal_round = appeal_round - 1; // the paid round is one lower than the actual round.
-            let appeal_fee = divide_and_round_up(
-                self.dispute_fee * pow(13, appeal_round), 
-                pow(5, appeal_round)
-            );
-            let nivsters_cut = base_cut * (
-                pow(2, appeal_round) + 
-                (pow(2, appeal_round) - 1) / voter_count
-            );
-
-            total_cut = total_cut + appeal_fee - nivsters_cut;
-        };
+    // If the losing party has made deposits, distribute protocol fees to the 
+    // treasury. The other party has paid for 1 round less.
+    if (dispute.appeals_used() >= 1) {
+        let total_cut = treasury_take(
+            dispute.dispute_fee(), 
+            dispute.treasury_share(), 
+            dispute.appeals_used() - 1
+        );
 
         transfer::public_transfer(
             self.reward_pool.split(total_cut).into_coin(ctx), 
             court_registry.treasury_address()
         );
     };
+
+    dispute.set_status(dispute_status_completed_one_sided());
 }
 
-/// Finalizes a fully adjudicated dispute after voting and tallying have completed.
+/// Finalizes a fully adjudicated dispute after voting and tallying have 
+/// completed.
 /// 
 /// This function may be called once the dispute has reached a terminal state
 /// and a winning option has been determined by juror voting.
@@ -680,17 +980,19 @@ public fun complete_dispute(
     ctx: &mut TxContext,
 ) {
     assert!(dispute.is_completed(clock), EDisputeNotCompleted);
-    dispute.set_status(dispute_status_completed());
 
     let court_id = object::id(court);
     let self = court.load_inner_mut();
-    let dispute_details = self.cases.borrow(dispute.contract());
-
-    // Refund the winner party.
     let idx = dispute.winner_party().extract() as u64;
     let winner_party = dispute.parties()[idx];
-    let deposit = dispute_details.depositors.get(&winner_party);
+    // The case is left to the case map intentionally, so that another case
+    // can't be opened for the contract with same configurations.
+    let deposit = self.cases.borrow(dispute.contract())
+    .get(dispute.serialized_config())
+    .depositors
+    .get(&winner_party);
 
+    // Refund the winner party.
     transfer::public_transfer(
         self.reward_pool.split(*deposit).into_coin(ctx), 
         winner_party
@@ -709,32 +1011,19 @@ public fun complete_dispute(
         ctx
     ), party));
 
-    // Distribute protocol fees to the treasury.
-    let mut appeal_count = dispute.appeals_used();
-    let voter_count = dispute.voters().length();
-    let base_cut = self.dispute_fee * (100 - self.treasury_share) / 100;
-    let mut total_cut = self.dispute_fee * self.treasury_share / 100;
-
-    while (appeal_count > 0) {
-        let appeal_fee = divide_and_round_up(
-            self.dispute_fee * pow(13, appeal_count), 
-            pow(5, appeal_count)
-        );
-        let nivsters_cut = base_cut * (
-            pow(2, appeal_count) + 
-            (pow(2, appeal_count) - 1) / voter_count
-        );
-
-        total_cut = total_cut + appeal_fee - nivsters_cut;
-        appeal_count = appeal_count - 1;
-    };
+    // Distribute protocol fees to the treasury from the other party's half.
+    let total_cut = treasury_take(
+        dispute.dispute_fee(), 
+        dispute.treasury_share(), 
+        dispute.appeals_used()
+    );
 
     transfer::public_transfer(
         self.reward_pool.split(total_cut).into_coin(ctx), 
         court_registry.treasury_address()
     );
 
-    // NVR fees.
+    // Distribute protocol fees to the treasury from the NVR penalties.
     let winner_option = dispute.winner_option().extract();
     let winner_count = dispute.result()[winner_option as u64];
     let mut total_votes = 0;
@@ -744,21 +1033,22 @@ public fun complete_dispute(
     let (p, _) = minority_penalties_and_majority_stakes(
         voters,
         winner_option,
-        self.sanction_model,
-        self.min_stake,
-        self.empty_vote_penalty,
-        self.coefficient,
+        dispute.sanction_model(),
+        dispute.empty_vote_penalty(),
+        dispute.coefficient(),
         total_votes,
         winner_count,
         minority,
     );
 
-    let nivra_cut = p * self.treasury_share_nvr / 100;
+    let nivra_cut = p * dispute.treasury_share_nvr() / 100;
 
     transfer::public_transfer(
         self.stake_pool.split(nivra_cut).into_coin(ctx), 
         court_registry.treasury_address()
     );
+
+    dispute.set_status(dispute_status_completed());
 }
 
 /// Refunds a juror’s locked stake when a dispute is cancelled.
@@ -786,7 +1076,7 @@ public fun collect_rewards_cancelled(
 
     assert!(!voter_details.reward_collected(), ERewardAlreadyCollected);
 
-    let case_locked_amount = voter_details.votes() * self.min_stake;
+    let case_locked_amount = voter_details.stake();
 
     stake.locked_amount = stake.locked_amount - case_locked_amount;
     stake.amount = stake.amount + case_locked_amount;
@@ -817,32 +1107,27 @@ public fun collect_rewards_one_sided(
     assert!(cap.dispute_id_voter() == object::id(dispute), EInvalidVoterCap);
 
     let self = court.load_inner_mut();
-    let appeal_count = dispute.appeals_used();
-    let voter_count = dispute.voters().length();
+    let appeals_used = dispute.appeals_used();
+    let total_stake_sum = dispute.total_stake_sum();
     let voter_details = dispute.voters_mut().borrow_mut(cap.voter());
     let stake = self.stakes.borrow_mut(cap.voter());
 
     assert!(!voter_details.reward_collected(), ERewardAlreadyCollected);
 
     // Distribute any sui lost by the another party to the nivsters.
-    if (appeal_count >= 1) {
-        // if appeals = 1, then the party has paid the dispute opening fee.
-        let base_cut = self.dispute_fee * (100 - self.treasury_share) / 100;
-        let mut total_cut = base_cut;
-        let mut appeal_round = appeal_count;
+    if (appeals_used >= 1) {
+        let total_cut = nivsters_take(
+            self.dispute_fee, 
+            self.treasury_share, 
+            appeals_used - 1
+        );
 
-        // if appeals > 1, then the party has also paid for appeal rounds.
-        while (appeal_round > 1) {
-            appeal_round = appeal_round - 1; // the paid round is one lower than the actual round.
-            total_cut = total_cut + base_cut * 
-            (pow(2, appeal_round) + (pow(2, appeal_round) - 1) / voter_count);
-        };
-
-        stake.reward_amount = stake.reward_amount + total_cut / voter_count;
+        stake.reward_amount = stake.reward_amount + total_cut * 
+        voter_details.stake() / total_stake_sum;
     };
 
     // Unlock the users nvr stake.
-    let case_locked_amount = voter_details.votes() * self.min_stake;
+    let case_locked_amount = voter_details.stake();
 
     stake.locked_amount = stake.locked_amount - case_locked_amount;
     stake.amount = stake.amount + case_locked_amount;
@@ -921,29 +1206,19 @@ public fun collect_rewards_completed(
     let (penalties, majority_stake) = minority_penalties_and_majority_stakes(
         voters, 
         winner_option, 
-        self.sanction_model, 
-        self.min_stake, 
-        self.empty_vote_penalty, 
-        self.coefficient, 
+        dispute.sanction_model(), 
+        dispute.empty_vote_penalty(), 
+        dispute.coefficient(), 
         total_votes, 
         winner_count, 
         minority
     );
 
-    let mut appeal_count = dispute.appeals_used();
-    let voter_count = dispute.voters().length();
-    let base_cut = self.dispute_fee * (100 - self.treasury_share) / 100;
-    let mut total_cut = base_cut;
-
-    while (appeal_count > 0) {
-        let nivsters_cut = base_cut * (
-            pow(2, appeal_count) + 
-            (pow(2, appeal_count) - 1) / voter_count
-        );
-
-        total_cut = total_cut + nivsters_cut;
-        appeal_count = appeal_count - 1;
-    };
+    let total_cut = nivsters_take(
+        dispute.dispute_fee(), 
+        dispute.treasury_share(), 
+        dispute.appeals_used()
+    );
 
     let sui_reward = total_cut * staked_amount / majority_stake;
     let nvr_reward = penalties * staked_amount / majority_stake;
@@ -985,6 +1260,9 @@ public fun create_court(
     default_evidence_period_ms: u64,
     default_voting_period_ms: u64,
     default_appeal_period_ms: u64,
+    key_servers: vector<address>,
+    public_keys: vector<vector<u8>>,
+    threshold: u8,
     ctx: &mut TxContext,
 ): ID {
     court_registry.validate_admin_privileges(cap);
@@ -992,6 +1270,12 @@ public fun create_court(
     assert!(treasury_share_nvr <= 100, EInvalidTreasuryShareInternal);
     assert!(empty_vote_penalty <= 100, EInvalidTreasuryShareInternal);
     assert!(sanction_model < 3, EInvalidSanctionModelInternal);
+    assert!(min_stake > 0, EZeroMinStakeInternal);
+
+    // Seal limitations.
+    assert!(key_servers.length() == public_keys.length(), EInvalidKeyConfigInternal);
+    assert!(threshold > 0, EInvalidThresholdInternal);
+    assert!(threshold as u64 <= key_servers.length(), EInvalidThresholdInternal);
 
     if (sanction_model == FIXED_PERCENTAGE_MODEL) {
         assert!(coefficient < 100, EInvalidCoefficientInternal);
@@ -1024,6 +1308,9 @@ public fun create_court(
         worker_pool: worker_pool::empty(ctx),
         stake_pool: balance::zero<NVR>(),
         reward_pool: balance::zero<SUI>(),
+        key_servers,
+        public_keys,
+        threshold,
     };
 
     let court = Court { 
@@ -1123,7 +1410,10 @@ public(package) fun draw_nivsters(
         nivster_stake.in_worker_pool = false;
 
         // Fail safe, should never throw.
-        assert!(n_stake == nivster_stake.amount && n_stake >= self.min_stake, EBalanceMismatchInternal);
+        assert!(
+            n_stake == nivster_stake.amount && n_stake >= self.min_stake, 
+            EBalanceMismatchInternal
+        );
 
         // Lock the minimum stake amount for a vote in the case.
         nivster_stake.amount = nivster_stake.amount - self.min_stake;
@@ -1133,8 +1423,11 @@ public(package) fun draw_nivsters(
             // Nivster was already chosen in a previous draw, vote count is incremented by 1.
             let nivster_details = nivsters.borrow_mut(n_addr);
             nivster_details.increment_votes();
+            nivster_details.increase_stake(self.min_stake)
         } else {
-            nivsters.push_back(n_addr, create_voter_details());
+            nivsters.push_back(n_addr, create_voter_details(
+                self.min_stake
+            ));
         };
 
         // Narrow the selection range by nivster's stake amount.
@@ -1161,6 +1454,126 @@ public(package) fun load_inner(self: &Court): &CourtInner {
 }
 
 // === Private Functions ===
+/// Calculates the total reward amount R that treasury takes from the deposited 
+/// fees.
+/// 
+/// `R(k) = F(n)[1 + (5/8) * ((13/5)^(k+1) - (13/5))] - T(k)`
+///
+/// where:
+/// - `F(n)`: dispute fee
+/// - `k`: appeal count
+/// - `T(k)`: nivsters_take
+fun treasury_take(
+    dispute_fee: u64,
+    treasury_share: u64,
+    appeals: u8,
+): u64 {
+    assert!(appeals <= MAX_APPEALS, EAppealsOverflowInternal);
+
+    let r = std::uq64_64::from_int(std::u64::pow(13, appeals + 1))
+    .div(std::uq64_64::from_int(std::u64::pow(5, appeals + 1)))
+    // = (13/5)^(k+1)
+    .sub(
+        std::uq64_64::from_int(13)
+        .div(std::uq64_64::from_int(5))
+    )
+    // = (13/5)^(k+1) - (13/5)
+    .mul(
+        std::uq64_64::from_int(5)
+        .div(std::uq64_64::from_int(8))
+    )
+    // = (5/8) * ((13/5)^(k+1) - (13/5))
+    .add(std::uq64_64::from_int(1))
+    // = [1 + (5/8) * ((13/5)^(k+1) - (13/5))]
+    .mul(std::uq64_64::from_int(dispute_fee))
+    // = F(n)[1 + (5/8) * ((13/5)^(k+1) - (13/5))]
+    .to_int();
+
+    let t = nivsters_take(dispute_fee, treasury_share, appeals);
+
+    if(t >= r) {
+        0 
+    } else {
+        r - t
+    }
+}
+
+/// Calculates the total reward amount T that nivsters take from the deposited 
+/// fees.
+/// 
+/// `T(k) = F(n)(1 - a)[(2^(k + 1) - 1) + (2^(k + 1) - k - 2) / N]`
+/// 
+/// where:
+/// - `F(n)`: dispute fee
+/// - `a`: treasury_share in percentages scaled by 100
+/// - `k`: appeal count
+/// - `N`: initial nivster count
+fun nivsters_take(
+    dispute_fee: u64,
+    treasury_share: u64,
+    appeals: u8,
+): u64 {
+    assert!(appeals <= MAX_APPEALS, EAppealsOverflowInternal);
+
+    // F(n)(1 - a) => F(n)(100 - a) / 100
+    let base = std::uq64_64::from_int(dispute_fee * (100 - treasury_share))
+    .div(std::uq64_64::from_int(100));
+    // 2^(k + 1)
+    let step = std::u64::pow(2, appeals + 1);
+    // [(2^(k + 1) - 1) + (2^(k + 1) - k - 2) / N]
+    let base_multiplier = std::uq64_64::from_int(step - 1)
+    .add(
+        std::uq64_64::from_int(step - (appeals as u64) - 2)
+        .div(std::uq64_64::from_int(INIT_NIVSTER_COUNT))
+    );
+
+    base.mul(base_multiplier).to_int()
+}
+
+fun dispute_exists_for_contract(
+    self: &CourtInner,
+    contract_id: ID,
+    serialized_config: &vector<u8>,
+): bool {
+    if (!self.cases.contains(contract_id)) {
+        false
+    } else {
+        let case = self.cases.borrow(contract_id);
+
+        case.contains(serialized_config)
+    }
+}
+
+fun serialize_dispute_config(
+    contract_id: ID,
+    parties: vector<address>,
+    options: vector<String>,
+    max_appeals: u8,
+): vector<u8> {
+    let mut serialized: vector<u8> = vector::empty();
+    let mut parties = parties;
+    let mut options = options;
+
+    // Sort addresses and options, so the order doesn't matter
+    parties.insertion_sort_by!(|a, b| (*a).to_u256() < (*b).to_u256());
+    options.insertion_sort_by!(|a, b| {
+        let mut a_sum = 0;
+        let mut b_sum = 0;
+
+        a.as_bytes().do_ref!(|char_val| a_sum = a_sum + (*char_val as u64));
+        b.as_bytes().do_ref!(|char_val| b_sum = b_sum + (*char_val as u64));
+
+        a_sum <= b_sum
+    });
+
+    serialized.append(object::id_to_bytes(&contract_id));
+    parties.do!(|addr| serialized.append(addr.to_bytes()));
+    options.do!(|option| serialized.append(option.into_bytes()));
+    serialized.push_back(max_appeals);
+
+    serialized
+}
+
 fun penalty(
     sanction_model: u64,
     coefficient: u64,
@@ -1173,13 +1586,16 @@ fun penalty(
         return staked_amount * coefficient / 100
     };
 
-    if (sanction_model == MINORITY_SCALED_MODEL) {
+    if (sanction_model == MINORITY_SCALED_MODEL && minority_votes > 0) {
         return staked_amount * coefficient / (minority_votes * 100)
     };
 
     if (sanction_model == QUADRATIC_MODEL) {
-        return staked_amount * coefficient * pow(winner_votes, 2) 
-        / (100 * pow(total_votes, 2))
+        return (
+            (staked_amount as u128) * (coefficient as u128) 
+            * std::u128::pow(winner_votes as u128, 2) 
+            / (100 * std::u128::pow(total_votes as u128, 2))
+        ) as u64
     };
 
     0
@@ -1189,7 +1605,6 @@ fun minority_penalties_and_majority_stakes(
     voters: &LinkedTable<address, VoterDetails>,
     winner_option: u8,
     sanction_model: u64,
-    min_stake: u64,
     empty_vote_penalty: u64,
     coefficient: u64,
     total_votes: u64,
@@ -1203,7 +1618,7 @@ fun minority_penalties_and_majority_stakes(
     while (i.is_some()) {
         let k = *i.borrow();
         let v = voters.borrow(k);
-        let staked_amount = v.votes() * min_stake;
+        let staked_amount = v.stake();
 
         if (v.decrypted_vote().is_none()) {
             p = p + staked_amount * empty_vote_penalty / 100;

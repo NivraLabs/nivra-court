@@ -1,4 +1,4 @@
-// © 2025 Nivra Labs Ltd.
+// © 2026 Nivra Labs Ltd.
 
 module nivra::constants;
 
@@ -13,8 +13,7 @@ const DISPUTE_STATUS_COMPLETED: u64 = 5;
 const DISPUTE_STATUS_COMPLETED_ONE_SIDED: u64 = 6;
 const DISPUTE_STATUS_CANCELLED: u64 = 7;
 
-// === View Functions ===
-/// Returns the current package version.
+// === Public Functions ===
 public fun current_version(): u64 {
     CURRENT_VERSION
 }

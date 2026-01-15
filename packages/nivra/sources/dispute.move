@@ -57,6 +57,7 @@ public struct VoterCap has key, store {
 }
 
 public struct VoterDetails has copy, drop, store {
+    stake: u64,
     votes: u64,
     vote: Option<EncryptedObject>,
     decrypted_vote: Option<u8>,
@@ -97,6 +98,13 @@ public struct Dispute has key {
     key_servers: vector<address>,
     public_keys: vector<vector<u8>>,
     threshold: u8,
+    serialized_config: vector<u8>,
+    dispute_fee: u64,
+    sanction_model: u64,
+    coefficient: u64,
+    treasury_share: u64,
+    treasury_share_nvr: u64,
+    empty_vote_penalty: u64,
 }
 
 // === Public Functions ===
@@ -279,7 +287,26 @@ public fun has_appeals_left(dispute: &Dispute): bool {
     dispute.appeals_used < dispute.max_appeals
 }
 
+public fun total_stake_sum(dispute: &Dispute): u64 {
+    let mut i = dispute.voters.front();
+    let mut s = 0;
+
+    while (i.is_some()) {
+        let k = *i.borrow();
+        let v = dispute.voters.borrow(k);
+
+        s = s + v.stake;
+        i = dispute.voters.next(k);
+    };
+
+    s
+}
+
 // === View Functions ===
+
+public fun serialized_config(dispute: &Dispute): &vector<u8> {
+    &dispute.serialized_config
+}
 
 public fun winner_option(dispute: &Dispute): Option<u8> {
     dispute.winner_option
@@ -303,6 +330,30 @@ public(package) fun voters_mut(dispute: &mut Dispute): &mut LinkedTable<address,
 
 public(package) fun voters(dispute: &Dispute): &LinkedTable<address, VoterDetails> {
     &dispute.voters
+}
+
+public fun dispute_fee(dispute: &Dispute): u64 {
+    dispute.dispute_fee
+}
+
+public fun treasury_share(dispute: &Dispute): u64 {
+    dispute.treasury_share
+}
+
+public fun sanction_model(dispute: &Dispute): u64 {
+    dispute.sanction_model
+}
+
+public fun empty_vote_penalty(dispute: &Dispute): u64 {
+    dispute.empty_vote_penalty
+}
+
+public fun coefficient(dispute: &Dispute): u64 {
+    dispute.coefficient
+}
+
+public fun treasury_share_nvr(dispute: &Dispute): u64 {
+    dispute.treasury_share_nvr
 }
 
 public fun max_appeals(dispute: &Dispute): u8 {
@@ -353,6 +404,10 @@ public fun votes(voter_details: &VoterDetails): u64 {
     voter_details.votes
 }
 
+public fun stake(voter_details: &VoterDetails): u64 {
+    voter_details.stake
+}
+
 public fun reward_collected(voter_details: &VoterDetails): bool {
     voter_details.reward_collected
 }
@@ -369,6 +424,13 @@ public(package) fun increment_votes(voter_details: &mut VoterDetails) {
 
 public(package) fun set_reward_collected(voter_details: &mut VoterDetails) {
     voter_details.reward_collected = true;
+}
+
+public(package) fun increase_stake(
+    voter_details: &mut VoterDetails, 
+    amount: u64
+) {
+    voter_details.stake = voter_details.stake + amount;
 }
 
 public(package) fun start_new_round_appeal(dispute: &mut Dispute, clock: &Clock, ctx: &mut TxContext) {
@@ -504,6 +566,13 @@ public(package) fun create_dispute(
     key_servers: vector<address>,
     public_keys: vector<vector<u8>>,
     threshold: u8,
+    serialized_config: vector<u8>,
+    dispute_fee: u64,
+    sanction_model: u64,
+    coefficient: u64,
+    treasury_share: u64,
+    treasury_share_nvr: u64,
+    empty_vote_penalty: u64,
     clock: &Clock,
     ctx: &mut TxContext,
 ): ID {
@@ -536,6 +605,13 @@ public(package) fun create_dispute(
         key_servers,
         public_keys,
         threshold,
+        serialized_config,
+        dispute_fee,
+        sanction_model,
+        coefficient,
+        treasury_share,
+        treasury_share_nvr,
+        empty_vote_penalty,
     };
 
     let dispute_id = object::id(&dispute);
@@ -590,8 +666,9 @@ public(package) fun distribute_party_caps(
     });
 }
 
-public(package) fun create_voter_details(): VoterDetails {
+public(package) fun create_voter_details(stake: u64): VoterDetails {
     VoterDetails {
+        stake,
         votes: 1,
         vote: std::option::none(),
         decrypted_vote: std::option::none(),

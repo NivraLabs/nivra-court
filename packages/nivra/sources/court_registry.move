@@ -1,4 +1,4 @@
-// © 2025 Nivra Labs Ltd.
+// © 2026 Nivra Labs Ltd.
 
 /// The Court Registry manages courts, shared configuration, and administrative 
 /// privileges within the Nivra protocol.
@@ -35,12 +35,11 @@ public struct NivraAdminCap has key, store {
 
 /// Metadata describing a court.
 ///
-/// This struct contains user-facing information and participation requirements.
-///
 /// Fields:
 /// - `category`: The category under which the court is classified.
 /// - `name`: The court’s display name.
-/// - `description`: A description of the court’s scope, topics, and governing rules.
+/// - `description`: A description of the court’s scope, topics, and governing 
+///    rules.
 /// - `skills`: A description of the skills required to participate.
 /// - `min_stake`: The minimum NVR stake required for participation.
 public struct CourtMetadata has copy, drop, store {
@@ -64,10 +63,11 @@ public struct CourtRegistry has key {
 ///
 /// Fields:
 /// - `admin_whitelist`: A map of active Nivra admin cap IDs and their
-///   privilege level (lower values indicate higher privilege).
+///    privilege level (lower values indicate higher privilege).
 /// - `allowed_versions`: A list of allowed nivra package versions.
 /// - `courts`: A table mapping court IDs to their associated metadata.
-/// - `treasury_address`: The Nivra treasury address that receives collected fees.
+/// - `treasury_address`: The Nivra treasury address that receives collected 
+///    fees.
 public struct CourtRegistryInner has store {
     admin_whitelist: VecMap<ID, u64>,
     allowed_versions: VecSet<u64>,
@@ -110,7 +110,7 @@ public fun treasury_address(self: &CourtRegistry): address {
     self.load_inner().treasury_address
 }
 
-/// Nivra allowed versions.
+/// Nivra allowed package versions.
 public fun allowed_versions(self: &CourtRegistry): VecSet<u64> {
     let self = self.load_inner();
 
@@ -122,10 +122,17 @@ public fun allowed_versions(self: &CourtRegistry): VecSet<u64> {
 ///
 /// Aborts if:
 /// - the admin capability is not present in the admin whitelist.
-public fun validate_admin_privileges(self: &CourtRegistry, cap: &NivraAdminCap): u64 {
+public fun validate_admin_privileges(
+    self: &CourtRegistry, 
+    cap: &NivraAdminCap
+): u64 {
     let self: &CourtRegistryInner = self.inner.load_value();
 
-    assert!(self.admin_whitelist.contains(&object::id(cap)), EAdminCapBlacklisted);
+    assert!(
+        self.admin_whitelist.contains(&object::id(cap)), 
+        EAdminCapBlacklisted
+    );
+
     *self.admin_whitelist.get(&object::id(cap))
 }
 
@@ -148,7 +155,10 @@ public fun mint_admin_cap(
         id: object::new(ctx),
     };
 
-    self.admin_whitelist.insert(object::id(&new_admin_cap), privilege_level + 1);
+    self.admin_whitelist.insert(
+        object::id(&new_admin_cap), 
+        privilege_level + 1
+    );
     transfer::public_transfer(new_admin_cap, receiver);
 }
 
@@ -160,7 +170,11 @@ public fun mint_admin_cap(
 /// Aborts if:
 /// - The caller’s admin capability is not authorized
 /// - The caller does not have sufficient privilege to revoke the target
-public fun blacklist_admin_cap(self: &mut CourtRegistry, cap: &NivraAdminCap, target_cap: ID) {
+public fun blacklist_admin_cap(
+    self: &mut CourtRegistry, 
+    cap: &NivraAdminCap, 
+    target_cap: ID
+) {
     let privilege_level = self.validate_admin_privileges(cap);
     let self = self.load_inner_mut();
     let target_privilege_level = *self.admin_whitelist.get(&target_cap);
@@ -178,7 +192,11 @@ public fun blacklist_admin_cap(self: &mut CourtRegistry, cap: &NivraAdminCap, ta
 /// Aborts if:
 /// - The caller’s admin capability is not authorized
 /// - The caller does not have sufficient privilege to perform the purge
-public fun purge_admin_caps(self: &mut CourtRegistry, cap: &NivraAdminCap, privilege_threshold: u64) {
+public fun purge_admin_caps(
+    self: &mut CourtRegistry, 
+    cap: &NivraAdminCap, 
+    privilege_threshold: u64
+) {
     let privilege_level = self.validate_admin_privileges(cap);
     let self = self.load_inner_mut();
 
@@ -188,7 +206,8 @@ public fun purge_admin_caps(self: &mut CourtRegistry, cap: &NivraAdminCap, privi
     let mut i = 0;
 
     while (i < self.admin_whitelist.length()) {
-        let (cap_id, cap_privilege) = self.admin_whitelist.get_entry_by_idx(i);
+        let (cap_id, cap_privilege) = self.admin_whitelist
+        .get_entry_by_idx(i);
 
         if (*cap_privilege <= privilege_threshold) {
             purged_admin_whitelist.insert(*cap_id, *cap_privilege);
@@ -205,7 +224,11 @@ public fun purge_admin_caps(self: &mut CourtRegistry, cap: &NivraAdminCap, privi
 /// Aborts if:
 /// - The caller’s admin capability is not authorized
 /// - The caller's admin capability is not root
-public fun set_treasury_address(self: &mut CourtRegistry, cap: &NivraAdminCap, treasury_address: address) {
+public fun set_treasury_address(
+    self: &mut CourtRegistry, 
+    cap: &NivraAdminCap, 
+    treasury_address: address
+) {
     let privilege_level = self.validate_admin_privileges(cap);
 
     assert!(privilege_level == ROOT_PRIVILEGE, ENoPrivileges);
@@ -218,7 +241,11 @@ public fun set_treasury_address(self: &mut CourtRegistry, cap: &NivraAdminCap, t
 /// Aborts if:
 /// - The caller’s admin capability is not authorized
 /// - the version is already enabled.
-public fun enable_version(self: &mut CourtRegistry, cap: &NivraAdminCap, version: u64) {
+public fun enable_version(
+    self: &mut CourtRegistry, 
+    cap: &NivraAdminCap, 
+    version: u64
+) {
     self.validate_admin_privileges(cap);
 
     let self: &mut CourtRegistryInner = self.inner.load_value_mut();
@@ -232,7 +259,11 @@ public fun enable_version(self: &mut CourtRegistry, cap: &NivraAdminCap, version
 /// - The caller’s admin capability is not authorized
 /// - The version is the currently active version
 /// - The version is not enabled
-public fun disable_version(self: &mut CourtRegistry, cap: &NivraAdminCap, version: u64) {
+public fun disable_version(
+    self: &mut CourtRegistry, 
+    cap: &NivraAdminCap, 
+    version: u64
+) {
     self.validate_admin_privileges(cap);
 
     let self: &mut CourtRegistryInner = self.inner.load_value_mut();
@@ -242,19 +273,23 @@ public fun disable_version(self: &mut CourtRegistry, cap: &NivraAdminCap, versio
 }
 
 // === Package Functions ===
-/// Register a new court in the court registry. 
-public(package) fun register_court(self: &mut CourtRegistry, court_id: ID, metadata: CourtMetadata) {
+/// Registers a new court in the court registry. 
+public(package) fun register_court(
+    self: &mut CourtRegistry, 
+    court_id: ID, 
+    metadata: CourtMetadata
+) {
     let self = self.load_inner_mut();
     self.courts.add(court_id, metadata);
 }
 
-/// Unregister court from the court registry.
+/// Unregisters a court from the court registry.
 public(package) fun unregister_court(self: &mut CourtRegistry, court_id: ID) {
     let self = self.load_inner_mut();
     self.courts.remove(court_id);
 }
 
-/// Create metadata for a court.
+/// Creates metadata for a court.
 public(package) fun create_metadata(
     category: String,
     name: String,
@@ -271,7 +306,9 @@ public(package) fun create_metadata(
     }
 }
 
-public(package) fun load_inner_mut(self: &mut CourtRegistry): &mut CourtRegistryInner {
+public(package) fun load_inner_mut(
+    self: &mut CourtRegistry
+): &mut CourtRegistryInner {
     let inner: &mut CourtRegistryInner = self.inner.load_value_mut();
     let package_version = current_version();
     assert!(inner.allowed_versions.contains(&package_version), EWrongVersion);
