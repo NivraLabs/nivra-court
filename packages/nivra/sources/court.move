@@ -197,11 +197,13 @@ public enum Status has copy, drop, store {
 /// - `reward_amount`: Accumulated rewards denominated in MIST.
 /// - `in_worker_pool`: Whether the user is currently enrolled in the worker 
 ///    pool.
+/// - `worker_pool_pos`: Position in the worker pool.
 public struct Stake has drop, store {
     amount: u64,
     locked_amount: u64,
     reward_amount: u64,
     in_worker_pool: bool,
+    worker_pool_pos: u64,
 }
 
 /// Per-contract dispute data.
@@ -404,8 +406,10 @@ public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
         // If the user is enrolled in the worker pool, automatically
         // increase the worker pool stake.
         if (stake.in_worker_pool) {
-            let i = self.worker_pool.index_by_address(sender).extract();
-            self.worker_pool.add_stake(i, deposit_amount);
+            self.worker_pool.add_stake(
+                stake.worker_pool_pos, 
+                deposit_amount
+            );
         };
     } else {
         self.stakes.push_back(sender, Stake {
@@ -413,6 +417,7 @@ public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
             locked_amount: 0,
             reward_amount: 0,
             in_worker_pool: false,
+            worker_pool_pos: 10_001,
         });
     };
 
@@ -460,13 +465,10 @@ public fun withdraw(
     // Automatically update worker pool stake or remove the caller
     // if the remaining stake falls below the minimum threshold.
     if (stake.in_worker_pool && amount_nvr > 0) {
-        let i = self.worker_pool.index_by_address(sender).extract();
-
         if (stake.amount < self.min_stake) {
-            self.worker_pool.swap_remove(i);
-            stake.in_worker_pool = false;
+            remove_from_worker_pool(self, sender, stake.worker_pool_pos);
         } else {
-            self.worker_pool.sub_stake(i, amount_nvr);
+            self.worker_pool.sub_stake(stake.worker_pool_pos, amount_nvr);
         };
     };
 
@@ -506,6 +508,7 @@ public fun join_worker_pool(self: &mut Court, ctx: &mut TxContext) {
 
     self.worker_pool.push_back(sender, stake.amount);
     stake.in_worker_pool = true;
+    stake.worker_pool_pos = self.worker_pool.length() - 1;
 
     event::emit(WorkerPoolEntryEvent {});
 }
@@ -528,9 +531,7 @@ public fun leave_worker_pool(self: &mut Court, ctx: &mut TxContext) {
 
     assert!(stake.in_worker_pool, ENotInWorkerPool);
 
-    let i = self.worker_pool.index_by_address(sender).extract();
-    self.worker_pool.swap_remove(i);
-    stake.in_worker_pool = false;
+    remove_from_worker_pool(self, sender, stake.worker_pool_pos);
 
     event::emit(WorkerPoolDepartEvent {});
 }
@@ -1088,10 +1089,12 @@ public fun complete_dispute(
 
     let nivra_cut = p * dispute.treasury_share_nvr() / 100;
 
-    transfer::public_transfer(
-        self.stake_pool.split(nivra_cut).into_coin(ctx), 
-        court_registry.treasury_address()
-    );
+    if (nivra_cut > 0) {
+        transfer::public_transfer(
+            self.stake_pool.split(nivra_cut).into_coin(ctx), 
+            court_registry.treasury_address()
+        );
+    };
 
     dispute.set_status(dispute_status_completed());
 
@@ -1135,8 +1138,10 @@ public fun collect_rewards_cancelled(
     voter_details.set_reward_collected();
 
     if (stake.in_worker_pool) {
-        let i = self.worker_pool.index_by_address(cap.voter()).extract();
-        self.worker_pool.add_stake(i, case_locked_amount);
+        self.worker_pool.add_stake(
+            stake.worker_pool_pos, 
+            case_locked_amount
+        );
     };
 
     event::emit(RewardEvent {
@@ -1165,7 +1170,10 @@ public fun collect_rewards_one_sided(
     dispute: &mut Dispute,
     cap: &VoterCap,
 ) {
-    assert!(dispute.status() == dispute_status_completed_one_sided(), EDisputeNotCompletedOneSided);
+    assert!(
+        dispute.status() == dispute_status_completed_one_sided(), 
+        EDisputeNotCompletedOneSided
+    );
     assert!(cap.dispute_id_voter() == object::id(dispute), EInvalidVoterCap);
 
     let self = court.load_inner_mut();
@@ -1199,8 +1207,7 @@ public fun collect_rewards_one_sided(
     voter_details.set_reward_collected();
 
     if (stake.in_worker_pool) {
-        let i = self.worker_pool.index_by_address(cap.voter()).extract();
-        self.worker_pool.add_stake(i, case_locked_amount);
+        self.worker_pool.add_stake(stake.worker_pool_pos, case_locked_amount);
     };
 
     event::emit(RewardEvent {
@@ -1256,8 +1263,10 @@ public fun collect_rewards_completed(
 
         // Update the worker pool amount.
         if (stake.in_worker_pool) {
-            let i = self.worker_pool.index_by_address(cap.voter()).extract();
-            self.worker_pool.add_stake(i, staked_amount - penalty);
+            self.worker_pool.add_stake(
+                stake.worker_pool_pos, 
+                staked_amount - penalty
+            );
         };
 
         // Set status as collected.
@@ -1295,8 +1304,10 @@ public fun collect_rewards_completed(
 
         // Update the worker pool amount.
         if (stake.in_worker_pool) {
-            let i = self.worker_pool.index_by_address(cap.voter()).extract();
-            self.worker_pool.add_stake(i, staked_amount - penalty);
+            self.worker_pool.add_stake(
+                stake.worker_pool_pos, 
+                staked_amount - penalty
+            );
         };
 
         let voter_details = dispute.voters_mut().borrow_mut(cap.voter());
@@ -1342,8 +1353,10 @@ public fun collect_rewards_completed(
     voter_details.set_reward_collected();
 
     if (stake.in_worker_pool) {
-        let i = self.worker_pool.index_by_address(cap.voter()).extract();
-        self.worker_pool.add_stake(i, staked_amount + nvr_reward);
+        self.worker_pool.add_stake(
+            stake.worker_pool_pos, 
+            staked_amount + nvr_reward
+        );
     };
 
     event::emit(RewardEvent {
@@ -1493,7 +1506,7 @@ public fun update_allowed_versions(
 /// in the worker pool.
 /// 
 /// Limitations:
-/// - Unique dynamic field accesses ≈ 3 * nivster_count + 10.
+/// - Unique dynamic field accesses ≈ 4 * nivster_count + 10.
 /// 
 /// Aborts if:
 /// - The worker pool does not contain enough eligible nivsters to satisfy
@@ -1524,8 +1537,7 @@ public(package) fun draw_nivsters(
         let nivster_stake = self.stakes.borrow_mut(n_addr);
 
         // Remove the nivster n from the worker pool to prevent duplicate selections.
-        self.worker_pool.swap_remove(wp_idx);
-        nivster_stake.in_worker_pool = false;
+        remove_from_worker_pool(self, n_addr, wp_idx);
 
         // Fail safe, should never throw.
         assert!(
@@ -1761,4 +1773,27 @@ fun minority_penalties_and_majority_stakes(
     };
 
     (p, s)
+}
+
+fun remove_from_worker_pool(
+    self: &mut CourtInner,
+    addr: address,
+    idx: u64,
+) {
+    let last_pos_idx = self.worker_pool.length() - 1;
+
+    // Update the position of the last staker in the worker pool
+    if (last_pos_idx != idx) {
+        let (last_pos_addr, _) = self.worker_pool.get_idx(last_pos_idx);
+        let last_staker = self.stakes.borrow_mut(last_pos_addr);
+        last_staker.worker_pool_pos = idx;
+    };
+
+    // Update the status and position of the removed staker.
+    let removed_staker = self.stakes.borrow_mut(addr);
+    removed_staker.in_worker_pool = false;
+    removed_staker.worker_pool_pos = 10_001;
+
+    // Perform the swap remove.
+    self.worker_pool.swap_remove(idx);
 }
