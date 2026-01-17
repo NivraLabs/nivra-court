@@ -679,3 +679,22 @@ public(package) fun reset_votes(voters: &mut LinkedTable<address, VoterDetails>)
         i = voters.next(k);
     };
 }
+
+// === Test Functions ===
+#[test_only]
+public(package) fun create_voter_details_test(
+    stake: u64,
+    votes: u64,
+    decrypted_vote: Option<u8>,
+    decrypted_party_vote: Option<u8>,
+): VoterDetails {
+    VoterDetails {
+        stake,
+        votes,
+        vote: std::option::none(),
+        decrypted_vote,
+        decrypted_party_vote,
+        cap_issued: false,
+        reward_collected: false,
+    }
+}

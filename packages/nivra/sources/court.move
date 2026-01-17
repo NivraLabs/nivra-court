@@ -86,7 +86,6 @@ const EInvalidCoefficientInternal: u64 = 38;
 const EZeroMinStakeInternal: u64 = 40;
 const EInvalidThresholdInternal: u64 = 41;
 const EInvalidKeyConfigInternal: u64 = 42;
-const EAppealsOverflowInternal: u64 = 43;
 
 #[error]
 const EOptionTooLong: vector<u8> =
@@ -1667,53 +1666,7 @@ public(package) fun nivsters_take(
     }
 }
 
-// === Private Functions ===
-
-fun dispute_exists_for_contract(
-    self: &CourtInner,
-    contract_id: ID,
-    serialized_config: &vector<u8>,
-): bool {
-    if (!self.cases.contains(contract_id)) {
-        false
-    } else {
-        let case = self.cases.borrow(contract_id);
-
-        case.contains(serialized_config)
-    }
-}
-
-fun serialize_dispute_config(
-    contract_id: ID,
-    parties: vector<address>,
-    options: vector<String>,
-    max_appeals: u8,
-): vector<u8> {
-    let mut serialized: vector<u8> = vector::empty();
-    let mut parties = parties;
-    let mut options = options;
-
-    // Sort addresses and options, so the order doesn't matter
-    parties.insertion_sort_by!(|a, b| (*a).to_u256() < (*b).to_u256());
-    options.insertion_sort_by!(|a, b| {
-        let mut a_sum = 0;
-        let mut b_sum = 0;
-
-        a.as_bytes().do_ref!(|char_val| a_sum = a_sum + (*char_val as u64));
-        b.as_bytes().do_ref!(|char_val| b_sum = b_sum + (*char_val as u64));
-
-        a_sum <= b_sum
-    });
-
-    serialized.append(object::id_to_bytes(&contract_id));
-    parties.do!(|addr| serialized.append(addr.to_bytes()));
-    options.do!(|option| serialized.append(option.into_bytes()));
-    serialized.push_back(max_appeals);
-
-    serialized
-}
-
-fun penalty(
+public(package) fun penalty(
     sanction_model: u64,
     coefficient: u64,
     staked_amount: u64,
@@ -1740,7 +1693,70 @@ fun penalty(
     0
 }
 
-fun minority_penalties_and_majority_stakes(
+public(package) fun serialize_dispute_config(
+    contract_id: ID,
+    parties: vector<address>,
+    options: vector<String>,
+    max_appeals: u8,
+): vector<u8> {
+    let mut serialized: vector<u8> = vector::empty();
+    let mut parties = parties;
+    let mut options = options;
+
+    let mut val_per_word: VecMap<String, u64> = vec_map::empty();
+
+    options.do_ref!(|word| {
+        let mut sum = 0;
+
+        word.as_bytes().do_ref!(|char_val| sum = sum + (*char_val as u64));
+        val_per_word.insert(*word, sum);
+    });
+
+    // Sort addresses and options, so the order doesn't matter
+    parties.insertion_sort_by!(|a, b| (*a).to_u256() < (*b).to_u256());
+    options.insertion_sort_by!(|a, b| {
+        let a_val = val_per_word.get(a);
+        let b_val = val_per_word.get(b);
+
+        // In rare cases, if the words have the same value, then compare by
+        // byte positions.
+        if (*a_val == *b_val) {
+            let mut bytes: &vector<u8>;
+            let mut compare: &vector<u8>;
+
+            if (a.length() > b.length()) {
+                bytes = b.as_bytes();
+                compare = a.as_bytes();
+            } else {
+                bytes = a.as_bytes();
+                compare = b.as_bytes();
+            };
+
+            let mut i = 0;
+
+            while (i < bytes.length() - 1) {
+                if (bytes[i] != compare[i]) {
+                    return bytes[i] < compare[i]
+                };
+
+                i = i + 1;
+            };
+
+            bytes[bytes.length() - 1] < compare[bytes.length() - 1]
+        } else {
+            *a_val < *b_val
+        }
+    });
+
+    serialized.append(object::id_to_bytes(&contract_id));
+    parties.do!(|addr| serialized.append(addr.to_bytes()));
+    options.do!(|option| serialized.append(option.into_bytes()));
+    serialized.push_back(max_appeals);
+
+    serialized
+}
+
+public(package) fun minority_penalties_and_majority_stakes(
     voters: &LinkedTable<address, VoterDetails>,
     winner_option: u8,
     sanction_model: u64,
@@ -1782,6 +1798,22 @@ fun minority_penalties_and_majority_stakes(
     };
 
     (p, s)
+}
+
+// === Private Functions ===
+
+fun dispute_exists_for_contract(
+    self: &CourtInner,
+    contract_id: ID,
+    serialized_config: &vector<u8>,
+): bool {
+    if (!self.cases.contains(contract_id)) {
+        false
+    } else {
+        let case = self.cases.borrow(contract_id);
+
+        case.contains(serialized_config)
+    }
 }
 
 fun remove_from_worker_pool(
