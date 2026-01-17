@@ -1533,11 +1533,10 @@ public(package) fun draw_nivsters(
         // Find the first nivster n whose cumulative stake sum is >= T.
         let wp_idx = self.worker_pool.search(selection_threshold);
         let (n_addr, n_stake) = self.worker_pool.get_idx(wp_idx);
-        // Load nivster's stake.
-        let nivster_stake = self.stakes.borrow_mut(n_addr);
-
         // Remove the nivster n from the worker pool to prevent duplicate selections.
         remove_from_worker_pool(self, n_addr, wp_idx);
+        // Load nivster's stake.
+        let nivster_stake = self.stakes.borrow_mut(n_addr);
 
         // Fail safe, should never throw.
         assert!(

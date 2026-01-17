@@ -1,4 +1,4 @@
-// © 2025 Nivra Labs Ltd.
+// © 2026 Nivra Labs Ltd.
 
 module nivra::dispute;
 
@@ -61,7 +61,6 @@ public struct VoterDetails has copy, drop, store {
     votes: u64,
     vote: Option<EncryptedObject>,
     decrypted_vote: Option<u8>,
-    party_vote: Option<EncryptedObject>,
     decrypted_party_vote: Option<u8>,
     cap_issued: bool,
     reward_collected: bool,
@@ -145,24 +144,22 @@ public fun finalize_vote(
         v.vote.do_ref!(|vote| {
             decrypt(vote, &verified_derived_keys, &all_public_keys)
             .do_ref!(|decrypted| {
-                if (decrypted.length() == 1 && decrypted[0] as u64 <= dispute.options.length()) {
-                    let option = decrypted[0];
-                    v.decrypted_vote = option::some(option);
-                    *&mut result[option as u64] = result[option as u64] + v.votes;
-                }
-            });
-        });
+                if (decrypted.length() == 2) {
+                    if (decrypted[0] as u64 <= dispute.options.length()) {
+                        let option = decrypted[0];
+                        v.decrypted_vote = option::some(option);
+                        *&mut result[option as u64] = result[option as u64] + 
+                        v.votes;
+                    };
 
-        // Decrypt party vote
-        v.party_vote.do_ref!(|party_vote| {
-            decrypt(party_vote, &verified_derived_keys, &all_public_keys)
-            .do_ref!(|decrypted| {
-                if (decrypted.length() == 1 && decrypted[0] as u64 < dispute.parties.length()) {
-                    let option = decrypted[0];
-                    v.decrypted_party_vote = option::some(option);
-                    *&mut party_result[option as u64] = party_result[option as u64] + v.votes;
-                }
-            })
+                    if (decrypted[1] as u64 < dispute.parties.length()) {
+                        let option = decrypted[1];
+                        v.decrypted_party_vote = option::some(option);
+                        *&mut party_result[option as u64] = 
+                        party_result[option as u64] + v.votes;
+                    };
+                };
+            });
         });
 
         i = dispute.voters.next(k);
@@ -176,7 +173,6 @@ public fun finalize_vote(
 public fun cast_vote(
     dispute: &mut Dispute,
     encrypted_vote: vector<u8>,
-    encrypted_party_vote: vector<u8>,
     cap: &VoterCap,
     clock: &Clock,
     ctx: &mut TxContext,
@@ -185,23 +181,14 @@ public fun cast_vote(
     assert!(dispute.voters.contains(cap.voter), ENotVoter);
 
     let encrypted_vote = parse_encrypted_object(encrypted_vote);
-    let encrypted_party_vote = parse_encrypted_object(encrypted_party_vote);
 
     assert!(encrypted_vote.aad().borrow() == ctx.sender().to_bytes(), EInvalidVote);
-    assert!(encrypted_party_vote.aad().borrow() == ctx.sender().to_bytes(), EInvalidVote);
-
     assert!(encrypted_vote.services() == dispute.key_servers, EInvalidVote);
-    assert!(encrypted_party_vote.services() == dispute.key_servers, EInvalidVote);
-
     assert!(encrypted_vote.threshold() == dispute.threshold, EInvalidVote);
-    assert!(encrypted_party_vote.threshold() == dispute.threshold, EInvalidVote);
-
     assert!(encrypted_vote.id() == object::id(dispute).to_bytes(), EInvalidVote);
-    assert!(encrypted_party_vote.id() == object::id(dispute).to_bytes(), EInvalidVote);
 
     let v = dispute.voters.borrow_mut(cap.voter);
     v.vote = option::some(encrypted_vote);
-    v.party_vote = option::some(encrypted_party_vote);
 }
 
 entry fun seal_approve(id: vector<u8>, dispute: &Dispute, clock: &Clock) {
@@ -672,7 +659,6 @@ public(package) fun create_voter_details(stake: u64): VoterDetails {
         votes: 1,
         vote: std::option::none(),
         decrypted_vote: std::option::none(),
-        party_vote: std::option::none(),
         decrypted_party_vote: std::option::none(),
         cap_issued: false,
         reward_collected: false,
@@ -688,7 +674,6 @@ public(package) fun reset_votes(voters: &mut LinkedTable<address, VoterDetails>)
 
         v.vote = option::none();
         v.decrypted_vote = option::none();
-        v.party_vote = option::none();
         v.decrypted_party_vote = option::none();
 
         i = voters.next(k);
