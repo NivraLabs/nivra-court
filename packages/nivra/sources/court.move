@@ -991,7 +991,8 @@ public fun resolve_one_sided_dispute(
         let total_cut = treasury_take(
             dispute.dispute_fee(), 
             dispute.treasury_share(), 
-            dispute.appeals_used() - 1
+            dispute.appeals_used() - 1,
+            INIT_NIVSTER_COUNT
         );
 
         transfer::public_transfer(
@@ -1061,7 +1062,8 @@ public fun complete_dispute(
     let total_cut = treasury_take(
         dispute.dispute_fee(), 
         dispute.treasury_share(), 
-        dispute.appeals_used()
+        dispute.appeals_used(),
+        INIT_NIVSTER_COUNT
     );
 
     transfer::public_transfer(
@@ -1191,7 +1193,8 @@ public fun collect_rewards_one_sided(
         let total_cut = nivsters_take(
             self.dispute_fee, 
             self.treasury_share, 
-            appeals_used - 1
+            appeals_used - 1,
+            INIT_NIVSTER_COUNT
         );
 
         sui_cut = total_cut * voter_details.stake() / total_stake_sum;
@@ -1337,7 +1340,8 @@ public fun collect_rewards_completed(
     let total_cut = nivsters_take(
         dispute.dispute_fee(), 
         dispute.treasury_share(), 
-        dispute.appeals_used()
+        dispute.appeals_used(),
+        INIT_NIVSTER_COUNT
     );
 
     // Distribute reward based on staked amount.
@@ -1582,7 +1586,6 @@ public(package) fun load_inner(self: &Court): &CourtInner {
     inner
 }
 
-// === Private Functions ===
 /// Calculates the total reward amount R that treasury takes from the deposited 
 /// fees.
 /// 
@@ -1592,33 +1595,31 @@ public(package) fun load_inner(self: &Court): &CourtInner {
 /// - `F(n)`: dispute fee
 /// - `k`: appeal count
 /// - `T(k)`: nivsters_take
-fun treasury_take(
+public(package) fun treasury_take(
     dispute_fee: u64,
     treasury_share: u64,
     appeals: u8,
+    init_nivster_count: u64,
 ): u64 {
-    assert!(appeals <= MAX_APPEALS, EAppealsOverflowInternal);
+    let mut r = 0;
+    let mut i = 0;
 
-    let r = std::uq64_64::from_int(std::u64::pow(13, appeals + 1))
-    .div(std::uq64_64::from_int(std::u64::pow(5, appeals + 1)))
-    // = (13/5)^(k+1)
-    .sub(
-        std::uq64_64::from_int(13)
-        .div(std::uq64_64::from_int(5))
-    )
-    // = (13/5)^(k+1) - (13/5)
-    .mul(
-        std::uq64_64::from_int(5)
-        .div(std::uq64_64::from_int(8))
-    )
-    // = (5/8) * ((13/5)^(k+1) - (13/5))
-    .add(std::uq64_64::from_int(1))
-    // = [1 + (5/8) * ((13/5)^(k+1) - (13/5))]
-    .mul(std::uq64_64::from_int(dispute_fee))
-    // = F(n)[1 + (5/8) * ((13/5)^(k+1) - (13/5))]
-    .to_int();
+    while (i <= appeals) {
+        let appeal_fee = std::u128::divide_and_round_up(
+            dispute_fee as u128 * std::u128::pow(13, i), 
+            std::u128::pow(5, i)
+        );
 
-    let t = nivsters_take(dispute_fee, treasury_share, appeals);
+        r = r + (appeal_fee as u64);
+        i = i + 1;
+    };
+
+    let t = nivsters_take(
+        dispute_fee, 
+        treasury_share, 
+        appeals,
+        init_nivster_count,
+    );
 
     if(t >= r) {
         0 
@@ -1628,7 +1629,7 @@ fun treasury_take(
 }
 
 /// Calculates the total reward amount T that nivsters take from the deposited 
-/// fees.
+/// sui fees. Rounds up the result in favor of nivsters.
 /// 
 /// `T(k) = F(n)(1 - a)[(2^(k + 1) - 1) + (2^(k + 1) - k - 2) / N]`
 /// 
@@ -1637,13 +1638,12 @@ fun treasury_take(
 /// - `a`: treasury_share in percentages scaled by 100
 /// - `k`: appeal count
 /// - `N`: initial nivster count
-fun nivsters_take(
+public(package) fun nivsters_take(
     dispute_fee: u64,
     treasury_share: u64,
     appeals: u8,
+    init_nivster_count: u64,
 ): u64 {
-    assert!(appeals <= MAX_APPEALS, EAppealsOverflowInternal);
-
     // F(n)(1 - a) => F(n)(100 - a) / 100
     let base = std::uq64_64::from_int(dispute_fee * (100 - treasury_share))
     .div(std::uq64_64::from_int(100));
@@ -1653,11 +1653,21 @@ fun nivsters_take(
     let base_multiplier = std::uq64_64::from_int(step - 1)
     .add(
         std::uq64_64::from_int(step - (appeals as u64) - 2)
-        .div(std::uq64_64::from_int(INIT_NIVSTER_COUNT))
+        .div(std::uq64_64::from_int(init_nivster_count))
     );
 
-    base.mul(base_multiplier).to_int()
+    let result = base.mul(base_multiplier);
+    let result_int = result.to_int();
+
+    // Round up the result if the fractional part > 0.
+    if (result.gt(std::uq64_64::from_int(result_int))) {
+        result_int + 1
+    } else {
+        result_int
+    }
 }
+
+// === Private Functions ===
 
 fun dispute_exists_for_contract(
     self: &CourtInner,
