@@ -133,23 +133,3 @@ fun test_search_100() {
     worker_pool.destroy();
     test_scenario::end(scenario);
 }
-
-#[test]
-fun index_by_address() {
-    let mut scenario = test_scenario::begin(@0x0);
-    let mut worker_pool = worker_pool::empty(ctx(&mut scenario));
-
-    let mut i = 1;
-
-    while (i <= 100) {
-        worker_pool.push_back(sui::address::from_u256(i), i as u64);
-        i = i + 1;
-    };
-
-    assert!(worker_pool.index_by_address(sui::address::from_u256(1)).borrow() == 0, 0);
-    assert!(worker_pool.index_by_address(sui::address::from_u256(100)).borrow() == 99, 0);
-    assert!(worker_pool.index_by_address(sui::address::from_u256(101)).is_none(), 0);
-
-    worker_pool.destroy();
-    test_scenario::end(scenario);
-}

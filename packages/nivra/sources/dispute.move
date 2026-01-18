@@ -1,5 +1,11 @@
 // © 2026 Nivra Labs Ltd.
 
+/// The Dispute module encapsulates the internal logic of a dispute process.
+///
+/// Responsibilities include:
+/// - Tracking dispute deadlines and time-based transitions
+/// - Collecting submitted evidence
+/// - Managing voting and determining the final outcome
 module nivra::dispute;
 
 // === Imports ===
@@ -19,16 +25,17 @@ use seal::bf_hmac_encryption::{
     PublicKey,
     decrypt
 };
-use nivra::constants::dispute_status_response;
-use nivra::constants::dispute_status_active;
-use nivra::constants::dispute_status_tallied;
-use nivra::constants::dispute_status_tie;
+use nivra::constants::{
+    dispute_status_response,
+    dispute_status_active,
+    dispute_status_tallied,
+    dispute_status_tie
+};
 
 // === Constants ===
 const MAX_EVIDENCE_LIMIT: u64 = 3;
 
 // === Errors ===
-
 const EEvidenceFull: u64 = 1;
 const ENotPartyMember: u64 = 2;
 const ENoEvidenceFound: u64 = 3;
@@ -43,19 +50,45 @@ const EInvalidDispute: u64 = 11;
 const EInvalidDerivedKeyAmount: u64 = 12;
 
 // === Structs ===
-
+/// Capability granting authorization to call party-restricted functions.
+/// 
+/// A `PartyCap` proves that the holder is a recognized party in a specific
+/// dispute. It is required to perform actions such as:
+/// - accepting a dispute
+/// - submitting evidence for the dispute
+///
+/// This capability is bound to a single dispute and a single party address.
 public struct PartyCap has key, store {
     id: UID,
     dispute_id: ID,
     party: address,
 }
 
+/// Capability granting authorization to call voter-restricted functions.
+/// 
+/// A `VoterCap` proves that the holder is an eligible voter in a specific
+/// dispute. It is required to perform actions such as:
+/// - casting votes
+/// - collecting voter rewards
+///
+/// This capability is bound to a single dispute and a single voter address.
 public struct VoterCap has key, store {
     id: UID,
     dispute_id: ID,
     voter: address,
 }
 
+/// Internal state associated with a voter in a dispute.
+///
+/// Fields:
+/// - `stake`: Amount of stake locked by the voter for this dispute
+/// - `votes`: Number of voting power units assigned to the voter
+/// - `vote`: Encrypted vote submitted for the current voting round, if any
+/// - `decrypted_vote`: Decrypted vote value for the round, once revealed
+/// - `decrypted_party_vote`: Decrypted party vote for the round, once revealed
+/// - `cap_issued`: Whether a `VoterCap` has been issued to this voter
+/// - `reward_collected`: Whether the voter has already collected rewards for 
+///    this dispute
 public struct VoterDetails has copy, drop, store {
     stake: u64,
     votes: u64,
@@ -66,13 +99,66 @@ public struct VoterDetails has copy, drop, store {
     reward_collected: bool,
 }
 
+/// Dispute timetable defining all time-based parameters for a single round.
+///
+/// All time values are expressed in milliseconds and define a strictly ordered
+/// sequence of periods starting at `round_init_ms`.
+///
+/// Period order:
+/// 1. Response period
+/// 2. Evidence period
+/// 3. Voting period
+/// 4. Appeal period
+///
+/// Special case:
+/// - In tie rounds, `response_period_ms` is set to `0`, causing the round to
+///   skip directly to the evidence period.
+/// 
+/// Fields:
+/// - `round_init_ms`: Timestamp (in ms) at which the round starts
+/// - `response_period_ms`: Duration (in ms) during which the counterparty may 
+///    accept the dispute. Set to `0` to skip this phase
+/// - `evidence_period_ms`: Duration (in ms) for submitting evidence
+/// - `voting_period_ms`: Duration (in ms) for casting votes
+/// - `appeal_period_ms`: Duration (in ms) for vote tallying and submitting 
+///    appeals
+/// - `response_swap`: Original response period duration, preserved when
+///   `response_period_ms` is temporarily set to `0` (e.g. tie rounds)
 public struct TimeTable has copy, drop, store {
     round_init_ms: u64,
-    response_period_ms: u64, // set to 0 on tie rounds to skip the response period.
+    response_period_ms: u64,
     evidence_period_ms: u64,
     voting_period_ms: u64,
     appeal_period_ms: u64,
-    response_swap: u64,      // Copy of the response period.
+    response_swap: u64,
+}
+
+/// Economic parameters snapshot inherited from the court at dispute creation.
+///
+/// These parameters are used for all fee, sanction, and reward calculations
+/// throughout the dispute lifecycle, even if the court’s economic model
+/// changes after the dispute is opened.
+///
+/// This ensures deterministic and predictable economic outcomes.
+/// 
+/// Fields:
+/// - `dispute_fee`: Base fee required to open a dispute
+/// - `sanction_model`: Identifier of the sanction model
+/// - `coefficient`: Sanction-model-specific coefficient controlling the 
+///    severity or weight of applied sanctions
+/// - `treasury_share`: Fraction of distributed SUI fees allocated to the 
+///    treasury in percentages scaled by 100
+/// - `treasury_share_nvr`: Fraction of slashed NVR tokens allocated to the 
+///    treasury in percentages scaled by 100
+/// - `empty_vote_penalty`: Penalty applied to voters who fail to cast a vote
+///    in percentages scaled by 100
+public struct EconomicParams has copy, drop, store {
+    dispute_fee: u64,
+    sanction_model: u64,
+    coefficient: u64,
+    treasury_share: u64,
+    treasury_share_nvr: u64,
+    empty_vote_penalty: u64,
 }
 
 public struct Dispute has key {
@@ -89,7 +175,7 @@ public struct Dispute has key {
     parties: vector<address>,                   // 2 parties per case.
     evidence: VecMap<address, vector<ID>>,      // Max 3 evidences per party.
     voters: LinkedTable<address, VoterDetails>,
-    options: vector<String>,                    // Max 10 + (empty vote) outcomes.
+    options: vector<String>,                    // Max 5 + (empty vote) outcomes.
     result: vector<u64>,                        // Vote count of each option.
     party_result: vector<u64>,                  // Vote count of each party.
     winner_option: Option<u8>,
@@ -98,12 +184,7 @@ public struct Dispute has key {
     public_keys: vector<vector<u8>>,
     threshold: u8,
     serialized_config: vector<u8>,
-    dispute_fee: u64,
-    sanction_model: u64,
-    coefficient: u64,
-    treasury_share: u64,
-    treasury_share_nvr: u64,
-    empty_vote_penalty: u64,
+    economic_params: EconomicParams,
 }
 
 // === Public Functions ===
@@ -320,27 +401,27 @@ public(package) fun voters(dispute: &Dispute): &LinkedTable<address, VoterDetail
 }
 
 public fun dispute_fee(dispute: &Dispute): u64 {
-    dispute.dispute_fee
+    dispute.economic_params.dispute_fee
 }
 
 public fun treasury_share(dispute: &Dispute): u64 {
-    dispute.treasury_share
+    dispute.economic_params.treasury_share
 }
 
 public fun sanction_model(dispute: &Dispute): u64 {
-    dispute.sanction_model
+    dispute.economic_params.sanction_model
 }
 
 public fun empty_vote_penalty(dispute: &Dispute): u64 {
-    dispute.empty_vote_penalty
+    dispute.economic_params.empty_vote_penalty
 }
 
 public fun coefficient(dispute: &Dispute): u64 {
-    dispute.coefficient
+    dispute.economic_params.coefficient
 }
 
 public fun treasury_share_nvr(dispute: &Dispute): u64 {
-    dispute.treasury_share_nvr
+    dispute.economic_params.treasury_share_nvr
 }
 
 public fun max_appeals(dispute: &Dispute): u8 {
@@ -459,9 +540,6 @@ public(package) fun start_new_round_tie(dispute: &mut Dispute, clock: &Clock, ct
     // Distribute voter caps to the additional nivsters.
     let dispute_id = object::id(dispute);
     distribute_voter_caps(&mut dispute.voters, dispute_id, ctx);
-
-    // Reset nivster's votes.
-    reset_votes(&mut dispute.voters);
 }
 
 public(package) fun tally_votes(dispute: &mut Dispute) {
@@ -593,12 +671,14 @@ public(package) fun create_dispute(
         public_keys,
         threshold,
         serialized_config,
-        dispute_fee,
-        sanction_model,
-        coefficient,
-        treasury_share,
-        treasury_share_nvr,
-        empty_vote_penalty,
+        economic_params: EconomicParams {
+            dispute_fee,
+            sanction_model,
+            coefficient,
+            treasury_share,
+            treasury_share_nvr,
+            empty_vote_penalty,
+        },
     };
 
     let dispute_id = object::id(&dispute);
