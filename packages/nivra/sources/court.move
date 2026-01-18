@@ -1179,8 +1179,7 @@ public fun collect_rewards_one_sided(
 
     let self = court.load_inner_mut();
     let appeals_used = dispute.appeals_used();
-    let total_stake_sum = dispute.total_stake_sum();
-    let voter_details = dispute.voters_mut().borrow_mut(cap.voter());
+    let voter_details = dispute.voters().borrow(cap.voter());
     let stake = self.stakes.borrow_mut(cap.voter());
 
     assert!(!voter_details.reward_collected(), ERewardAlreadyCollected);
@@ -1189,6 +1188,7 @@ public fun collect_rewards_one_sided(
 
     // Distribute any sui lost by the another party to the nivsters.
     if (appeals_used >= 1) {
+        let total_stake_sum = dispute.total_stake_sum();
         let total_cut = nivsters_take(
             self.dispute_fee, 
             self.treasury_share, 
@@ -1206,6 +1206,8 @@ public fun collect_rewards_one_sided(
 
     stake.locked_amount = stake.locked_amount - case_locked_amount;
     stake.amount = stake.amount + case_locked_amount;
+
+    let voter_details = dispute.voters_mut().borrow_mut(cap.voter());
     voter_details.set_reward_collected();
 
     if (stake.in_worker_pool) {
