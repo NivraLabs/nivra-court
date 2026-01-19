@@ -284,7 +284,8 @@ entry fun seal_approve(id: vector<u8>, dispute: &Dispute, clock: &Clock) {
 }
 
 public fun is_response_period(dispute: &Dispute, clock: &Clock): bool {
-    let response_period_end = dispute.timetable.round_init_ms + dispute.timetable.response_period_ms;
+    let response_period_end = dispute.timetable.round_init_ms + 
+    dispute.timetable.response_period_ms;
     let current_time = clock.timestamp_ms();
 
     current_time <= response_period_end && dispute.status == dispute_status_response()

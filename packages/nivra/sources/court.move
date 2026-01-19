@@ -347,10 +347,6 @@ public struct DisputeAcceptEvent has copy, drop {
     fee: u64,
 }
 
-public struct DisputeInitDrawEvent has copy, drop {
-    dispute_id: ID,
-}
-
 public struct DisputeTieEvent has copy, drop {
     dispute_id: ID,
 }
@@ -723,10 +719,6 @@ entry fun draw_initial_nivsters(
     );
 
     dispute.set_status(dispute_status_active());
-
-    event::emit(DisputeInitDrawEvent { 
-        dispute_id 
-    });
 }
 
 /// Starts a new appeal round for an existing dispute.
