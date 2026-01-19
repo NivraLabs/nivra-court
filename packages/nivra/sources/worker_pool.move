@@ -156,34 +156,6 @@ public(package) fun search(self: &WorkerPool, threshold: u64): u64 {
     pos
 }
 
-public(package) fun index_by_address(self: &WorkerPool, addr: address): Option<u64> {
-    let slices = (self.length - 1) / SLICE_SIZE;
-    let mut current_slice = 0;
-
-    while (current_slice <= slices) {
-        let slice: &Slice = dynamic_field::borrow(&self.id, current_slice);
-        let mut indexes_left = (self.length - 1) - current_slice * SLICE_SIZE;
-
-        if (indexes_left > 1000) {
-            indexes_left = 1000;
-        };
-
-        let mut j = 0;
-
-        while (j <= indexes_left) {
-            if (slice.addresses[j] == addr) {
-                return option::some(current_slice * SLICE_SIZE + j)
-            };
-
-            j = j + 1;
-        };
-
-        current_slice = current_slice + 1;
-    };
-
-    option::none()
-}
-
 public(package) fun add_stake(self: &mut WorkerPool, idx: u64, val: u64) {
     assert!(idx < self.length, EIndexOutOfBounds);
     let (slice, sub_idx) = self.idx_location_mut(idx);
