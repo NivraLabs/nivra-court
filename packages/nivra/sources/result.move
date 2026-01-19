@@ -7,6 +7,7 @@ module nivra::result;
 use std::string::String;
 
 // === Structs ===
+public struct RESULT has drop {}
 
 public struct Result has key, store {
     id: UID,
@@ -21,6 +22,37 @@ public struct Result has key, store {
 }
 
 // === View Functions ===
+fun init(otw: RESULT, ctx: &mut TxContext) {
+    let publisher = sui::package::claim(otw, ctx);
+    let mut result_display = 
+    sui::display::new<Result>(&publisher, ctx);
+
+    result_display.add(
+        b"name".to_string(),
+        b"Nivra Court Result".to_string()
+    );
+
+    result_display.add(
+        b"description".to_string(),
+        b"Result from a dispute: {dispute_id}.".to_string()
+    );
+
+    // TODO: Add accurate links to the case
+    result_display.add(
+        b"link".to_string(),
+        b"https://nivracourt.io/".to_string()
+    );
+
+    result_display.add(
+        b"image_url".to_string(),
+        b"https://static.nivracourt.io/nivra-result.svg".to_string()
+    );
+
+    result_display.update_version();
+
+    transfer::public_transfer(publisher, ctx.sender());
+    transfer::public_transfer(result_display, ctx.sender());
+}
 
 public fun has_correct_config(
     result: &Result,

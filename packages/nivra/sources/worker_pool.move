@@ -121,7 +121,7 @@ public(package) fun prefix_sum(self: &WorkerPool, idx: u64): u64 {
 
     while (i > 0) {
         sum = sum + self.bit_idx(i - 1);
-        i = i - (i & (bitwise_not(i) + 1)); // i -= i & -i
+        i = i - (i & (bitwise_not(i) + 1));
     };
 
     sum

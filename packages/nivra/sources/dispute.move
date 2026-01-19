@@ -51,6 +51,8 @@ const EInvalidDispute: u64 = 11;
 const EInvalidDerivedKeyAmount: u64 = 12;
 
 // === Structs ===
+public struct DISPUTE has drop {}
+
 public struct PartyCap has key, store {
     id: UID,
     dispute_id: ID,
@@ -122,6 +124,62 @@ public struct Dispute has key {
 // === Events ===
 
 // === Public Functions ===
+fun init(otw: DISPUTE, ctx: &mut TxContext) {
+    let publisher = sui::package::claim(otw, ctx);
+    let mut party_cap_display = 
+    sui::display::new<PartyCap>(&publisher, ctx);
+    let mut voter_cap_display =
+    sui::display::new<VoterCap>(&publisher, ctx);
+
+    party_cap_display.add(
+        b"name".to_string(),
+        b"Nivra Party Capability".to_string()
+    );
+
+    voter_cap_display.add(
+        b"name".to_string(),
+        b"Nivra Voter Capability".to_string()
+    );
+
+    party_cap_display.add(
+        b"description".to_string(),
+        b"You are a party in the nivra case: {dispute_id}.".to_string()
+    );
+
+    voter_cap_display.add(
+        b"description".to_string(),
+        b"You are a juror in the nivra case: {dispute_id}.".to_string()
+    );
+
+    // TODO: Add accurate links to the case
+    party_cap_display.add(
+        b"link".to_string(),
+        b"https://nivracourt.io/".to_string()
+    );
+
+    voter_cap_display.add(
+        b"link".to_string(),
+        b"https://nivracourt.io/".to_string()
+    );
+
+    party_cap_display.add(
+        b"image_url".to_string(),
+        b"https://static.nivracourt.io/nivra-party.svg".to_string()
+    );
+
+    voter_cap_display.add(
+        b"image_url".to_string(),
+        b"https://static.nivracourt.io/nivra-nivster.svg".to_string()
+    );
+
+    party_cap_display.update_version();
+    voter_cap_display.update_version();
+
+    transfer::public_transfer(publisher, ctx.sender());
+    transfer::public_transfer(party_cap_display, ctx.sender());
+    transfer::public_transfer(voter_cap_display, ctx.sender());
+}
+
 public fun finalize_vote(
     dispute: &mut Dispute,
     package_id: address,
