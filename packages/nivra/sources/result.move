@@ -1,5 +1,4 @@
-// © 2025 Nivra Labs Ltd.
-
+// © 2026 Nivra Labs Ltd.
 
 module nivra::result;
 
@@ -8,32 +7,151 @@ module nivra::result;
 use std::string::String;
 
 // === Structs ===
+public struct RESULT has drop {}
 
 public struct Result has key, store {
     id: UID,
+    court_id: ID,
     dispute_id: ID,
     contract_id: ID,
     options: vector<String>,
-    results: vector<u64>,
-    winner_option: u8,
+    winner_option: Option<u8>,
+    parties: vector<address>,
+    winner_party: u64,
+    max_appeals: u8,
+}
+
+// === View Functions ===
+fun init(otw: RESULT, ctx: &mut TxContext) {
+    let publisher = sui::package::claim(otw, ctx);
+    let mut result_display = 
+    sui::display::new<Result>(&publisher, ctx);
+
+    result_display.add(
+        b"name".to_string(),
+        b"Nivra Court Result".to_string()
+    );
+
+    result_display.add(
+        b"description".to_string(),
+        b"Result from a dispute: {dispute_id}.".to_string()
+    );
+
+    // TODO: Add accurate links to the case
+    result_display.add(
+        b"link".to_string(),
+        b"https://nivracourt.io/".to_string()
+    );
+
+    result_display.add(
+        b"image_url".to_string(),
+        b"https://static.nivracourt.io/nivra-result.svg".to_string()
+    );
+
+    result_display.update_version();
+
+    transfer::public_transfer(publisher, ctx.sender());
+    transfer::public_transfer(result_display, ctx.sender());
+}
+
+public fun has_correct_config(
+    result: &Result,
+    court_id: ID,
+    contract_id: ID,
+    options: &vector<String>,
+    parties: &vector<address>,
+    max_appeals: u8,
+): bool {
+    if (court_id != result.court_id || contract_id != result.contract_id) {
+        return false
+    };
+
+    if (max_appeals != result.max_appeals) {
+        return false
+    };
+
+    if (options.length() != result.options.length()) {
+        return false
+    };
+
+    let mut i = 0;
+
+    while (i < options.length()) {
+        if (!result.options.contains(&options[i])) {
+            return false
+        };
+
+        i = i + 1;
+    };
+
+    i = 0;
+
+    while (i < parties.length()) {
+        if (!result.parties.contains(&parties[i])) {
+            return false
+        };
+
+        i = i + 1;
+    };
+
+    true
+}
+
+public fun court_id(result: &Result): ID {
+    result.court_id
+}
+
+public fun dispute_id(result: &Result): ID {
+    result.dispute_id
+}
+
+public fun contract_id(result: &Result): ID {
+    result.contract_id
+}
+
+public fun options(result: &Result): vector<String> {
+    result.options
+}
+
+
+public fun winner_option(result: &Result): Option<String> {
+    result.winner_option.map!(|opt| result.options[opt as u64])
+}
+
+public fun parties(result: &Result): vector<address> {
+    result.parties
+}
+
+public fun winner_party(result: &Result): address {
+    result.parties[result.winner_party]
+}
+
+public fun max_appeals(result: &Result): u8 {
+    result.max_appeals
 }
 
 // === Package Functions ===
 
 public(package) fun create_result(
+    court_id: ID,
     dispute_id: ID,
     contract_id: ID,
     options: vector<String>,
-    results: vector<u64>,
-    winner_option: u8,
+    winner_option: Option<u8>,
+    parties: vector<address>,
+    winner_party: u64,
+    max_appeals: u8,
     ctx: &mut TxContext,
 ): Result {
     Result {
         id: object::new(ctx),
+        court_id,
         dispute_id,
         contract_id,
         options,
-        results,
         winner_option,
+        parties,
+        winner_party,
+        max_appeals,
     }
 }

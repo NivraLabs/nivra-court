@@ -1,16 +1,14 @@
-// © 2025 Nivra Labs Ltd.
+// © 2026 Nivra Labs Ltd.
 
-/// Module handling decentralized dispute resolution logic
+/// The Dispute module encapsulates the internal logic of a dispute process.
+///
+/// Responsibilities include:
+/// - Tracking dispute deadlines and time-based transitions
+/// - Collecting submitted evidence
+/// - Managing voting and determining the final outcome
 module nivra::dispute;
 
 // === Imports ===
-
-use nivra::constants::{
-    max_evidence_limit,
-    dispute_status_active,
-    dispute_status_tie,
-    dispute_status_tallied
-};
 use std::string::String;
 use sui::{
     linked_table::{Self, LinkedTable},
@@ -27,9 +25,18 @@ use seal::bf_hmac_encryption::{
     PublicKey,
     decrypt
 };
+use nivra::constants::{
+    dispute_status_response,
+    dispute_status_draw,
+    dispute_status_active,
+    dispute_status_tallied,
+    dispute_status_tie
+};
+
+// === Constants ===
+const MAX_EVIDENCE_LIMIT: u64 = 3;
 
 // === Errors ===
-
 const EEvidenceFull: u64 = 1;
 const ENotPartyMember: u64 = 2;
 const ENoEvidenceFound: u64 = 3;
@@ -37,42 +44,55 @@ const ENotEvidencePeriod: u64 = 4;
 const EInvalidVote: u64 = 5;
 const ENotVotingPeriod: u64 = 6;
 const ENotVoter: u64 = 7;
-const EVotingPeriodNotEnded: u64 = 8;
+const ENotAppealPeriodUntallied: u64 = 8;
 const ENotEnoughKeys: u64 = 9;
 const EAlreadyFinalized: u64 = 10;
 const EInvalidDispute: u64 = 11;
+const EInvalidDerivedKeyAmount: u64 = 12;
 
 // === Structs ===
+public struct DISPUTE has drop {}
 
-/// Capability that grants permission to submit or modify evidence
 public struct PartyCap has key, store {
     id: UID,
     dispute_id: ID,
     party: address,
 }
 
-/// Capability that grants permission to cast a vote
 public struct VoterCap has key, store {
     id: UID,
     dispute_id: ID,
     voter: address,
 }
 
-/// Voter-specific state stored inside a dispute
 public struct VoterDetails has copy, drop, store {
     stake: u64,
+    votes: u64,
     vote: Option<EncryptedObject>,
     decrypted_vote: Option<u8>,
-    multiplier: u64,
+    decrypted_party_vote: Option<u8>,
     cap_issued: bool,
+    reward_collected: bool,
 }
 
-/// Dispute timing window definitions per round
 public struct TimeTable has copy, drop, store {
     round_init_ms: u64,
+    response_period_ms: u64,
+    draw_period_ms: u64,
     evidence_period_ms: u64,
     voting_period_ms: u64,
     appeal_period_ms: u64,
+    response_swap: u64,
+    evidence_swap: u64,
+}
+
+public struct EconomicParams has copy, drop, store {
+    dispute_fee: u64,
+    sanction_model: u64,
+    coefficient: u64,
+    treasury_share: u64,
+    treasury_share_nvr: u64,
+    empty_vote_penalty: u64,
 }
 
 public struct Dispute has key {
@@ -82,25 +102,84 @@ public struct Dispute has key {
     contract: ID,
     court: ID,
     description: String,
-    round: u16,
+    round: u64,
     timetable: TimeTable,
-    max_appeals: u8,
+    max_appeals: u8,                            // Max 3 appeals per case.
     appeals_used: u8,
-    parties: vector<address>,
-    evidence: VecMap<address, vector<ID>>,
+    parties: vector<address>,                   // 2 parties per case.
+    evidence: VecMap<address, vector<ID>>,      // Max 3 evidences per party.
     voters: LinkedTable<address, VoterDetails>,
-    options: vector<String>,
-    result: vector<u64>,
+    options: vector<String>,                    // Max 5 + (empty vote) outcomes.
+    result: vector<u64>,                        // Vote count of each option.
+    party_result: vector<u64>,                  // Vote count of each party.
     winner_option: Option<u8>,
+    winner_party: Option<u8>,
     key_servers: vector<address>,
     public_keys: vector<vector<u8>>,
     threshold: u8,
+    serialized_config: vector<u8>,
+    economic_params: EconomicParams,
 }
 
-// === Public Functions ===
+// === Events ===
 
-/// Finalizes encrypted votes after voting period ends.
-/// Verifies threshold keys, decrypts votes, tallies result and sets dispute status.
+// === Public Functions ===
+fun init(otw: DISPUTE, ctx: &mut TxContext) {
+    let publisher = sui::package::claim(otw, ctx);
+    let mut party_cap_display = 
+    sui::display::new<PartyCap>(&publisher, ctx);
+    let mut voter_cap_display =
+    sui::display::new<VoterCap>(&publisher, ctx);
+
+    party_cap_display.add(
+        b"name".to_string(),
+        b"Nivra Party Capability".to_string()
+    );
+
+    voter_cap_display.add(
+        b"name".to_string(),
+        b"Nivra Voter Capability".to_string()
+    );
+
+    party_cap_display.add(
+        b"description".to_string(),
+        b"You are a party in the nivra case: {dispute_id}.".to_string()
+    );
+
+    voter_cap_display.add(
+        b"description".to_string(),
+        b"You are a juror in the nivra case: {dispute_id}.".to_string()
+    );
+
+    // TODO: Add accurate links to the case
+    party_cap_display.add(
+        b"link".to_string(),
+        b"https://nivracourt.io/".to_string()
+    );
+
+    voter_cap_display.add(
+        b"link".to_string(),
+        b"https://nivracourt.io/".to_string()
+    );
+
+    party_cap_display.add(
+        b"image_url".to_string(),
+        b"https://static.nivracourt.io/nivra-party.svg".to_string()
+    );
+
+    voter_cap_display.add(
+        b"image_url".to_string(),
+        b"https://static.nivracourt.io/nivra-nivster.svg".to_string()
+    );
+
+    party_cap_display.update_version();
+    voter_cap_display.update_version();
+
+    transfer::public_transfer(publisher, ctx.sender());
+    transfer::public_transfer(party_cap_display, ctx.sender());
+    transfer::public_transfer(voter_cap_display, ctx.sender());
+}
+
 public fun finalize_vote(
     dispute: &mut Dispute,
     package_id: address,
@@ -108,12 +187,8 @@ public fun finalize_vote(
     key_servers: &vector<address>,
     clock: &Clock,
 ) {
-    let voting_period_end = dispute.timetable.round_init_ms + dispute.timetable.evidence_period_ms
-        + dispute.timetable.voting_period_ms;
-    let current_time = clock.timestamp_ms();
-
-    assert!(current_time > voting_period_end, EVotingPeriodNotEnded);
-    assert!(key_servers.length() == derived_keys.length());
+    assert!(dispute.is_appeal_period_untallied(clock), ENotAppealPeriodUntallied);
+    assert!(key_servers.length() == derived_keys.length(), EInvalidDerivedKeyAmount);
     assert!(derived_keys.length() as u8 >= dispute.threshold, ENotEnoughKeys);
     assert!(dispute.result.length() == 0, EAlreadyFinalized);
 
@@ -131,20 +206,32 @@ public fun finalize_vote(
         .zip_map!(dispute.public_keys, |ks, pk| new_public_key(ks.to_id(), pk));
     
     let mut result = vector::tabulate!(dispute.options.length(), |_| 0);
+    let mut party_result = vector::tabulate!(dispute.parties.length(), |_| 0);
     let mut i = linked_table::front(&dispute.voters);
 
     while(i.is_some()) {
         let k = *i.borrow();
         let v = dispute.voters.borrow_mut(k);
 
+        // Decrypt vote
         v.vote.do_ref!(|vote| {
             decrypt(vote, &verified_derived_keys, &all_public_keys)
             .do_ref!(|decrypted| {
-                if (decrypted.length() == 1 && decrypted[0] as u64 < dispute.options.length()) {
-                    let option = decrypted[0];
-                    v.decrypted_vote = option::some(option);
-                    *&mut result[option as u64] = result[option as u64] + (1 * v.multiplier);
-                }
+                if (decrypted.length() == 2) {
+                    if (decrypted[0] as u64 < dispute.options.length()) {
+                        let option = decrypted[0];
+                        v.decrypted_vote = option::some(option);
+                        *&mut result[option as u64] = result[option as u64] + 
+                        v.votes;
+                    };
+
+                    if (decrypted[1] as u64 < dispute.parties.length()) {
+                        let option = decrypted[1];
+                        v.decrypted_party_vote = option::some(option);
+                        *&mut party_result[option as u64] = 
+                        party_result[option as u64] + v.votes;
+                    };
+                };
             });
         });
 
@@ -152,11 +239,10 @@ public fun finalize_vote(
     };
 
     dispute.result = result;
+    dispute.party_result = party_result;
     tally_votes(dispute);
 }
 
-
-/// Cast an encrypted vote during the valid voting time window.
 public fun cast_vote(
     dispute: &mut Dispute,
     encrypted_vote: vector<u8>,
@@ -164,11 +250,8 @@ public fun cast_vote(
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
-    let voting_period_start = dispute.timetable.round_init_ms + dispute.timetable.evidence_period_ms;
-    let voting_period_end = voting_period_start + dispute.timetable.voting_period_ms;
-    let current_time = clock.timestamp_ms();
-
-    assert!(current_time >= voting_period_start && current_time <= voting_period_end, ENotVotingPeriod);
+    assert!(dispute.is_voting_period(clock), ENotVotingPeriod);
+    assert!(cap.dispute_id == object::id(dispute), ENotVoter);
     assert!(dispute.voters.contains(cap.voter), ENotVoter);
 
     let encrypted_vote = parse_encrypted_object(encrypted_vote);
@@ -182,24 +265,151 @@ public fun cast_vote(
     v.vote = option::some(encrypted_vote);
 }
 
-/// Called by SEAL subsystem to authorize vote finalization.
 entry fun seal_approve(id: vector<u8>, dispute: &Dispute, clock: &Clock) {
-    let voting_period_end = dispute.timetable.round_init_ms + dispute.timetable.evidence_period_ms
-        + dispute.timetable.voting_period_ms;
+    assert!(dispute.is_appeal_period_untallied(clock), ENotAppealPeriodUntallied);
+    assert!(id == object::id(dispute).to_bytes(), EInvalidDispute);
+}
+
+public fun is_response_period(dispute: &Dispute, clock: &Clock): bool {
+    let response_period_end = dispute.timetable.round_init_ms + 
+    dispute.timetable.response_period_ms;
     let current_time = clock.timestamp_ms();
 
-    assert!(current_time > voting_period_end, EVotingPeriodNotEnded);
-    assert!(id == object::id(dispute).to_bytes(), EInvalidDispute);
+    current_time <= response_period_end && dispute.status == dispute_status_response()
+}
+
+public fun is_draw_period(dispute: &Dispute, clock: &Clock): bool {
+    let tt = dispute.timetable;
+    let draw_period_end = tt.round_init_ms + tt.response_period_ms + 
+    tt.draw_period_ms;
+    let current_time = clock.timestamp_ms();
+
+    current_time <= draw_period_end && dispute.status == dispute_status_draw()
+}
+
+public fun is_evidence_period(dispute: &Dispute, clock: &Clock): bool {
+    let tt = dispute.timetable;
+    let evidence_period_end = tt.round_init_ms + tt.response_period_ms + 
+    tt.draw_period_ms + tt.evidence_period_ms;
+    let current_time = clock.timestamp_ms();
+
+    // Start the evidence period soon as the status = active
+    current_time <= evidence_period_end && dispute.status == dispute_status_active()
+}
+
+public fun is_voting_period(dispute: &Dispute, clock: &Clock): bool {
+    let tt = dispute.timetable;
+    let voting_period_start = tt.round_init_ms + tt.response_period_ms + 
+    tt.draw_period_ms + tt.evidence_period_ms;
+    let voting_period_end = voting_period_start + tt.voting_period_ms;
+    let current_time = clock.timestamp_ms();
+
+    current_time > voting_period_start && current_time <= voting_period_end && dispute.status == dispute_status_active()
+}
+
+public fun is_appeal_period_untallied(dispute: &Dispute, clock: &Clock): bool {
+    let tt = dispute.timetable;
+    let appeal_period_start = tt.round_init_ms + tt.response_period_ms + 
+    tt.draw_period_ms + tt.evidence_period_ms + tt.voting_period_ms;
+    let appeal_period_end = appeal_period_start + tt.appeal_period_ms;
+    let current_time = clock.timestamp_ms();
+
+    current_time > appeal_period_start && current_time <= appeal_period_end && dispute.status == dispute_status_active()
+}
+
+public fun is_appeal_period_tallied(dispute: &Dispute, clock: &Clock): bool {
+    let tt = dispute.timetable;
+    let appeal_period_start = tt.round_init_ms + tt.response_period_ms + 
+    tt.draw_period_ms + tt.evidence_period_ms + tt.voting_period_ms;
+    let appeal_period_end = appeal_period_start + tt.appeal_period_ms;
+    let current_time = clock.timestamp_ms();
+
+    current_time > appeal_period_start && current_time <= appeal_period_end && dispute.status == dispute_status_tallied()
+}
+
+public fun is_appeal_period_tie(dispute: &Dispute, clock: &Clock): bool {
+    let tt = dispute.timetable;
+    let appeal_period_start = tt.round_init_ms + tt.response_period_ms + 
+    tt.draw_period_ms + tt.evidence_period_ms + tt.voting_period_ms;
+    let appeal_period_end = appeal_period_start + tt.appeal_period_ms;
+    let current_time = clock.timestamp_ms();
+
+    current_time > appeal_period_start && current_time <= appeal_period_end && dispute.status == dispute_status_tie()
+}
+
+// Dispute ended as completed and is ready for reward distribution.
+public fun is_completed(dispute: &Dispute, clock: &Clock): bool {
+    let tt = dispute.timetable;
+    let timetable_end = tt.round_init_ms + tt.response_period_ms + 
+    tt.draw_period_ms + tt.evidence_period_ms + tt.voting_period_ms + 
+    tt.appeal_period_ms;
+    let current_time = clock.timestamp_ms();
+
+    current_time > timetable_end && dispute.status == dispute_status_tallied()
+}
+
+// Dispute ended as uncompleted (votes not tallied or unresolved tie) and is ready be cancelled.
+public fun is_incomplete(dispute: &Dispute, clock: &Clock): bool {
+    let tt = dispute.timetable;
+    let draw_period_end = tt.round_init_ms + tt.response_period_ms + 
+    tt.draw_period_ms;
+    let timetable_end = draw_period_end + tt.evidence_period_ms + 
+    tt.voting_period_ms + tt.appeal_period_ms;
+    let current_time = clock.timestamp_ms();
+
+    let untallied_or_unresolved_tie = 
+    current_time > timetable_end && (dispute.status == dispute_status_active() 
+    || dispute.status == dispute_status_tie());
+
+    let no_init_nivsters = 
+    current_time > draw_period_end && dispute.status == dispute_status_draw();
+
+    no_init_nivsters || untallied_or_unresolved_tie
+}
+
+public fun party_failed_payment(dispute: &Dispute, clock: &Clock): bool {
+    !dispute.is_response_period(clock) && dispute.status == dispute_status_response()
+}
+
+public fun has_appeals_left(dispute: &Dispute): bool {
+    dispute.appeals_used < dispute.max_appeals
+}
+
+public fun total_stake_sum(dispute: &Dispute): u64 {
+    let mut i = dispute.voters.front();
+    let mut s = 0;
+
+    while (i.is_some()) {
+        let k = *i.borrow();
+        let v = dispute.voters.borrow(k);
+
+        s = s + v.stake;
+        i = dispute.voters.next(k);
+    };
+
+    s
 }
 
 // === View Functions ===
 
-public(package) fun options(dispute: &Dispute): vector<String> {
-    dispute.options
+public fun serialized_config(dispute: &Dispute): &vector<u8> {
+    &dispute.serialized_config
 }
 
-public(package) fun parties(dispute: &Dispute): vector<address> {
-    dispute.parties
+public fun winner_option(dispute: &Dispute): Option<u8> {
+    dispute.winner_option
+}
+
+public fun winner_party(dispute: &Dispute): Option<u8> {
+    dispute.winner_party
+}
+
+public fun appeals_used(dispute: &Dispute): u8 {
+    dispute.appeals_used
+}
+
+public fun round(dispute: &Dispute): u64 {
+    dispute.round
 }
 
 public(package) fun voters_mut(dispute: &mut Dispute): &mut LinkedTable<address, VoterDetails> {
@@ -210,78 +420,182 @@ public(package) fun voters(dispute: &Dispute): &LinkedTable<address, VoterDetail
     &dispute.voters
 }
 
-public(package) fun initiator(dispute: &Dispute): address {
+public fun dispute_fee(dispute: &Dispute): u64 {
+    dispute.economic_params.dispute_fee
+}
+
+public fun treasury_share(dispute: &Dispute): u64 {
+    dispute.economic_params.treasury_share
+}
+
+public fun sanction_model(dispute: &Dispute): u64 {
+    dispute.economic_params.sanction_model
+}
+
+public fun empty_vote_penalty(dispute: &Dispute): u64 {
+    dispute.economic_params.empty_vote_penalty
+}
+
+public fun coefficient(dispute: &Dispute): u64 {
+    dispute.economic_params.coefficient
+}
+
+public fun treasury_share_nvr(dispute: &Dispute): u64 {
+    dispute.economic_params.treasury_share_nvr
+}
+
+public fun max_appeals(dispute: &Dispute): u8 {
+    dispute.max_appeals
+}
+
+public fun options(dispute: &Dispute): vector<String> {
+    dispute.options
+}
+
+public fun inititator(dispute: &Dispute): address {
     dispute.initiator
 }
 
-public(package) fun contract(dispute: &Dispute): ID {
-    dispute.contract
+public fun parties(dispute: &Dispute): vector<address> {
+    dispute.parties
 }
 
-public(package) fun nivster_count(dispute: &Dispute): u64 {
-    dispute.voters.length()
-}
-
-public(package) fun winner_option(dispute: &Dispute): Option<u8> {
-    dispute.winner_option
-}
-
-public(package) fun result(dispute: &Dispute): vector<u64> {
+public fun result(dispute: &Dispute): vector<u64> {
     dispute.result
 }
 
-public(package) fun appeals_left(dispute: &Dispute): bool {
-    dispute.appeals_used < dispute.max_appeals
+public fun contract(dispute: &Dispute): ID {
+    dispute.contract
 }
 
-public(package) fun status(self: &Dispute): u64 {
-    self.status
+public fun status(dispute: &Dispute): u64 {
+    dispute.status
 }
 
-public(package) fun multiplier(self: &VoterDetails): u64 {
-    self.multiplier
+public fun dispute_id_voter(cap: &VoterCap): ID {
+    cap.dispute_id
 }
 
-public(package) fun decrypted_vote(self: &VoterDetails): Option<u8> {
-    self.decrypted_vote
+public fun voter(cap: &VoterCap): address {
+    cap.voter
 }
 
-public(package) fun stake(self: &VoterDetails): u64 {
-    self.stake
+public fun dispute_id_party(cap: &PartyCap): ID {
+    cap.dispute_id
+}
+
+public fun party(cap: &PartyCap): address {
+    cap.party
+}
+
+public fun votes(voter_details: &VoterDetails): u64 {
+    voter_details.votes
+}
+
+public fun stake(voter_details: &VoterDetails): u64 {
+    voter_details.stake
+}
+
+public fun reward_collected(voter_details: &VoterDetails): bool {
+    voter_details.reward_collected
+}
+
+public fun decrypted_vote(voter_details: &VoterDetails): Option<u8> {
+    voter_details.decrypted_vote
 }
 
 // === Package Functions ===
 
-public(package) fun set_status(dispute: &mut Dispute, status: u64) {
-    dispute.status = status;
+public(package) fun increment_votes(voter_details: &mut VoterDetails) {
+    voter_details.votes = voter_details.votes + 1;
 }
 
-public(package) fun increase_appeals(dispute: &mut Dispute) {
-    dispute.appeals_used = dispute.appeals_used + 1;
+public(package) fun set_reward_collected(voter_details: &mut VoterDetails) {
+    voter_details.reward_collected = true;
 }
 
-public(package) fun add_evidence(
-    dispute: &mut Dispute, 
-    evidence_id: ID, 
-    cap: &PartyCap, 
-    clock: &Clock
+public(package) fun increase_stake(
+    voter_details: &mut VoterDetails, 
+    amount: u64
 ) {
-    let evidence_period_start = dispute.timetable.round_init_ms;
-    let evidence_period_end = dispute.timetable.round_init_ms + dispute.timetable.evidence_period_ms;
-    let current_time = clock.timestamp_ms();
+    voter_details.stake = voter_details.stake + amount;
+}
 
-    assert!(current_time >= evidence_period_start && current_time <= evidence_period_end, ENotEvidencePeriod);
-    assert!(dispute.parties.contains(&cap.party), ENotPartyMember);
-    assert!(object::id(dispute) == cap.dispute_id, ENotPartyMember);
+public(package) fun start_new_round_appeal(dispute: &mut Dispute, clock: &Clock, ctx: &mut TxContext) {
+    // Start from response period as the opponent is required to make an additional deposit.
+    dispute.status = dispute_status_response();
+    // Use swap values in case a tie round occured in-between and it was zeroed.
+    dispute.timetable.response_period_ms = dispute.timetable.response_swap;
+    dispute.timetable.draw_period_ms = 0;
+    dispute.timetable.evidence_period_ms = dispute.timetable.evidence_swap;
+    dispute.timetable.round_init_ms = clock.timestamp_ms();
+    // Increase round.
+    dispute.round = dispute.round + 1;
+    dispute.appeals_used = dispute.appeals_used + 1;
+    // Reset last round's results.
+    dispute.result = vector[];
+    dispute.winner_option = option::none();
+    dispute.party_result = vector[];
+    dispute.winner_party = option::none();
 
-    if (!dispute.evidence.contains(&cap.party)) {
-        dispute.evidence.insert(cap.party, vector[]);
+    // Distribute voter caps to the additional nivsters.
+    let dispute_id = object::id(dispute);
+    distribute_voter_caps(&mut dispute.voters, dispute_id, ctx);
+
+    // Reset nivster's votes.
+    reset_votes(&mut dispute.voters);
+}
+
+public(package) fun start_new_round_tie(dispute: &mut Dispute, clock: &Clock, ctx: &mut TxContext) {
+    // Skip response & evidence periods in tie rounds.
+    dispute.status = dispute_status_active();
+    dispute.timetable.response_period_ms = 0;
+    dispute.timetable.draw_period_ms = 0;
+    dispute.timetable.evidence_period_ms = 0;
+    dispute.timetable.round_init_ms = clock.timestamp_ms();
+    // Increase round.
+    dispute.round = dispute.round + 1;
+    // Reset last round's results.
+    dispute.result = vector[];
+    dispute.winner_option = option::none();
+    dispute.party_result = vector[];
+    dispute.winner_party = option::none();
+
+    // Distribute voter caps to the additional nivsters.
+    let dispute_id = object::id(dispute);
+    distribute_voter_caps(&mut dispute.voters, dispute_id, ctx);
+}
+
+public(package) fun tally_votes(dispute: &mut Dispute) {
+    // Check winner option.
+    let mut highest_option = 0;
+    let mut second_highest_option = 0;
+
+    dispute.result.do_ref!(|option_votes| {
+        if (*option_votes >= highest_option) {
+            second_highest_option = highest_option;
+            highest_option = *option_votes;
+        };
+    });
+
+    // Check winner party.
+    let mut highest_party_option = 0;
+    let mut second_highest_party_option = 0;
+
+    dispute.party_result.do_ref!(|party_votes| {
+        if (*party_votes >= highest_party_option) {
+            second_highest_party_option = highest_party_option;
+            highest_party_option = *party_votes;
+        };
+    });
+
+    if (highest_option == second_highest_option || highest_party_option == second_highest_party_option) {
+        dispute.status = dispute_status_tie();
+    } else {
+        dispute.winner_option = dispute.result.find_index!(|res| res == highest_option).map!(|res| res as u8);
+        dispute.winner_party = dispute.party_result.find_index!(|res| res == highest_party_option).map!(|res| res as u8);
+        dispute.status = dispute_status_tallied();
     };
-
-    let evidence = dispute.evidence.get_mut(&cap.party);
-
-    assert!(evidence.length() < max_evidence_limit(), EEvidenceFull);
-    evidence.push_back(evidence_id);
 }
 
 public(package) fun remove_evidence(
@@ -290,12 +604,7 @@ public(package) fun remove_evidence(
     cap: &PartyCap, 
     clock: &Clock
 ) {
-    let evidence_period_start = dispute.timetable.round_init_ms;
-    let evidence_period_end = dispute.timetable.round_init_ms + dispute.timetable.evidence_period_ms;
-    let current_time = clock.timestamp_ms();
-
-    assert!(current_time >= evidence_period_start && current_time <= evidence_period_end, ENotEvidencePeriod);
-    assert!(dispute.parties.contains(&cap.party), ENotPartyMember);
+    assert!(dispute.is_evidence_period(clock), ENotEvidencePeriod);
     assert!(object::id(dispute) == cap.dispute_id, ENotPartyMember);
     assert!(dispute.evidence.contains(&cap.party), ENoEvidenceFound);
 
@@ -304,46 +613,30 @@ public(package) fun remove_evidence(
 
     assert!(i.is_some(), ENoEvidenceFound);
 
-    evidence.swap_remove(*i.borrow());
+    evidence.remove(*i.borrow());
 }
 
-public(package) fun is_party_member(dispute: &Dispute, cap: &PartyCap): bool {
-    dispute.parties.find_index!(|party| *party == cap.party).is_some()
+public(package) fun add_evidence(
+    dispute: &mut Dispute, 
+    evidence_id: ID, 
+    cap: &PartyCap, 
+    clock: &Clock
+) {
+    assert!(dispute.is_evidence_period(clock), ENotEvidencePeriod);
+    assert!(object::id(dispute) == cap.dispute_id, ENotPartyMember);
+
+    if (!dispute.evidence.contains(&cap.party)) {
+        dispute.evidence.insert(cap.party, vector[]);
+    };
+
+    let evidence = dispute.evidence.get_mut(&cap.party);
+
+    assert!(evidence.length() < MAX_EVIDENCE_LIMIT, EEvidenceFull);
+    evidence.push_back(evidence_id);
 }
 
-public(package) fun is_completed(dispute: &Dispute, clock: &Clock): bool {
-    let appeal_period_end = dispute.timetable.round_init_ms + dispute.timetable.evidence_period_ms
-        + dispute.timetable.voting_period_ms + dispute.timetable.evidence_period_ms;
-    let current_time = clock.timestamp_ms();
-
-    current_time > appeal_period_end
-}
-
-public(package) fun is_appeal_period(dispute: &Dispute, clock: &Clock): bool {
-    let appeal_period_start = dispute.timetable.round_init_ms + dispute.timetable.evidence_period_ms
-        + dispute.timetable.voting_period_ms;
-    let appeal_period_end = appeal_period_start + dispute.timetable.evidence_period_ms;
-    let current_time = clock.timestamp_ms();
-
-    current_time >= appeal_period_start && current_time < appeal_period_end
-}
-
-public(package) fun create_voter_details(stake: u64): VoterDetails {
-    VoterDetails {
-        stake,
-        vote: std::option::none(),
-        decrypted_vote: std::option::none(),
-        multiplier: 1,
-        cap_issued: false,
-    }
-}
-
-public(package) fun increase_multiplier(self: &mut VoterDetails) {
-    self.multiplier = self.multiplier + 1;
-}
-
-public(package) fun increase_stake(self: &mut VoterDetails, stake: u64) {
-    self.stake = self.stake + stake;
+public(package) fun set_status(dispute: &mut Dispute, status: u64) {
+    dispute.status = status;
 }
 
 public(package) fun create_dispute(
@@ -351,6 +644,8 @@ public(package) fun create_dispute(
     contract: ID,
     court: ID,
     description: String,
+    response_period_ms: u64,
+    draw_period_ms: u64,
     evidence_period_ms: u64,
     voting_period_ms: u64,
     appeal_period_ms: u64,
@@ -361,12 +656,19 @@ public(package) fun create_dispute(
     key_servers: vector<address>,
     public_keys: vector<vector<u8>>,
     threshold: u8,
+    serialized_config: vector<u8>,
+    dispute_fee: u64,
+    sanction_model: u64,
+    coefficient: u64,
+    treasury_share: u64,
+    treasury_share_nvr: u64,
+    empty_vote_penalty: u64,
     clock: &Clock,
     ctx: &mut TxContext,
-): Dispute {
-    Dispute {
+): ID {
+    let mut dispute = Dispute {
         id: object::new(ctx),
-        status: dispute_status_active(),
+        status: dispute_status_response(),
         initiator,
         contract,
         court,
@@ -374,9 +676,13 @@ public(package) fun create_dispute(
         round: 1,
         timetable: TimeTable {
             round_init_ms: clock.timestamp_ms(),
+            response_period_ms,
+            draw_period_ms,
             evidence_period_ms,
             voting_period_ms,
             appeal_period_ms,
+            response_swap: response_period_ms,
+            evidence_swap: evidence_period_ms,
         },
         max_appeals,
         appeals_used: 0,
@@ -385,85 +691,117 @@ public(package) fun create_dispute(
         voters,
         options,
         result: vector[],
+        party_result: vector[],
         winner_option: option::none(),
+        winner_party: option::none(),
         key_servers,
         public_keys,
         threshold,
-    }
-}
-
-public(package) fun start_new_round(dispute: &mut Dispute, clock: &Clock, ctx: &mut TxContext) {
-    distribute_voter_caps(dispute, ctx);
-
-    dispute.status = dispute_status_active();
-    dispute.round = dispute.round + 1;
-    dispute.timetable.round_init_ms = clock.timestamp_ms();
-    dispute.result = vector[];
-    dispute.winner_option = option::none();
-
-    let mut i = linked_table::front(&dispute.voters);
-
-    while(i.is_some()) {
-        let k = *i.borrow();
-        let v = dispute.voters.borrow_mut(k);
-
-        v.vote = option::none();
-        v.decrypted_vote = option::none();
-
-        i = dispute.voters.next(k);
+        serialized_config,
+        economic_params: EconomicParams {
+            dispute_fee,
+            sanction_model,
+            coefficient,
+            treasury_share,
+            treasury_share_nvr,
+            empty_vote_penalty,
+        },
     };
+
+    let dispute_id = object::id(&dispute);
+
+    distribute_party_caps(dispute.parties, dispute_id, ctx);
+    distribute_voter_caps(&mut dispute.voters, dispute_id, ctx);
+    transfer::share_object(dispute);
+
+    dispute_id
 }
 
-public(package) fun distribute_voter_caps(dispute: &mut Dispute, ctx: &mut TxContext) {
-    let mut i = linked_table::front(&dispute.voters);
+public(package) fun distribute_voter_caps(
+    voters: &mut LinkedTable<address, VoterDetails>,
+    dispute_id: ID,
+    ctx: &mut TxContext,
+) {
+    // Iterate the voters list backwards since new nivsters are always
+    // inserted at the back of the list.
+    let mut i = linked_table::back(voters);
+    let mut first_issued_found = false;
 
-    while(i.is_some()) {
+    while(i.is_some() && !first_issued_found) {
         let k = *i.borrow();
-        let v = dispute.voters.borrow_mut(k);
+        let v = voters.borrow_mut(k);
 
         if (!v.cap_issued) {
             v.cap_issued = true;
             transfer::public_transfer(VoterCap {
                 id: object::new(ctx),
-                dispute_id: object::id(dispute),
+                dispute_id,
                 voter: k,
             }, k);
+        } else {
+            first_issued_found = true;
         };
 
-        i = dispute.voters.next(k);
+        i = voters.prev(k);
     };
 }
 
-public(package) fun share_dispute(dispute: Dispute, ctx: &mut TxContext) {
-    dispute.parties.do_ref!(|party| {
+public(package) fun distribute_party_caps(
+    parties: vector<address>, 
+    dispute_id: ID, 
+    ctx: &mut TxContext
+) {
+    parties.do_ref!(|party| {
         transfer::public_transfer(PartyCap {
             id: object::new(ctx),
-            dispute_id: object::id(&dispute),
+            dispute_id,
             party: *party,
         }, *party)
     });
-
-    let mut dispute = dispute;
-    distribute_voter_caps(&mut dispute, ctx);
-
-    transfer::share_object(dispute);
 }
 
-public(package) fun tally_votes(dispute: &mut Dispute) {
-    let mut highest = 0;
-    let mut second_highest = 0;
+public(package) fun create_voter_details(stake: u64): VoterDetails {
+    VoterDetails {
+        stake,
+        votes: 1,
+        vote: std::option::none(),
+        decrypted_vote: std::option::none(),
+        decrypted_party_vote: std::option::none(),
+        cap_issued: false,
+        reward_collected: false,
+    }
+}
 
-    dispute.result.do_ref!(|option_votes| {
-        if (*option_votes >= highest) {
-            second_highest = highest;
-            highest = *option_votes;
-        };
-    });
+public(package) fun reset_votes(voters: &mut LinkedTable<address, VoterDetails>) {
+    let mut i = linked_table::front(voters);
 
-    if (second_highest == highest) {
-        dispute.status = dispute_status_tie();
-    } else {
-        dispute.winner_option = dispute.result.find_index!(|res| res == highest).map!(|res| res as u8);
-        dispute.status = dispute_status_tallied();
+    while(i.is_some()) {
+        let k = *i.borrow();
+        let v = voters.borrow_mut(k);
+
+        v.vote = option::none();
+        v.decrypted_vote = option::none();
+        v.decrypted_party_vote = option::none();
+
+        i = voters.next(k);
     };
+}
+
+// === Test Functions ===
+#[test_only]
+public(package) fun create_voter_details_test(
+    stake: u64,
+    votes: u64,
+    decrypted_vote: Option<u8>,
+    decrypted_party_vote: Option<u8>,
+): VoterDetails {
+    VoterDetails {
+        stake,
+        votes,
+        vote: std::option::none(),
+        decrypted_vote,
+        decrypted_party_vote,
+        cap_issued: false,
+        reward_collected: false,
+    }
 }
