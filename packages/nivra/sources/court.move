@@ -229,17 +229,23 @@ public struct CourtInner has store {
 
 // === Events ===
 public struct StakeEvent has copy, drop {
+    nivster: address,
     amount: u64,
 }
 
 public struct WithdrawEvent has copy, drop {
+    nivster: address,
     amount_nvr: u64,
     amount_sui: u64,
 }
 
-public struct WorkerPoolEntryEvent has copy, drop {}
+public struct WorkerPoolEntryEvent has copy, drop {
+    nivster: address,
+}
 
-public struct WorkerPoolDepartEvent has copy, drop {}
+public struct WorkerPoolDepartEvent has copy, drop {
+    nivster: address,
+}
 
 public struct DisputeCreationEvent has copy, drop {
     dispute_id: ID,
@@ -250,6 +256,7 @@ public struct DisputeCreationEvent has copy, drop {
     parties: vector<address>,
     options: vector<String>,
     response_period_ms: u64,
+    draw_period_ms: u64,
     evidence_period_ms: u64,
     voting_period_ms: u64,
     appeal_period_ms: u64,
@@ -361,7 +368,8 @@ public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
         });
     };
 
-    event::emit(StakeEvent { 
+    event::emit(StakeEvent {
+        nivster: sender,
         amount: deposit_amount, 
     });
 }
@@ -416,6 +424,7 @@ public fun withdraw(
     let sui = self.reward_pool.split(amount_sui).into_coin(ctx);
 
     event::emit(WithdrawEvent {
+        nivster: sender,
         amount_nvr,
         amount_sui,
     });
@@ -450,7 +459,9 @@ public fun join_worker_pool(self: &mut Court, ctx: &mut TxContext) {
     stake.in_worker_pool = true;
     stake.worker_pool_pos = self.worker_pool.length() - 1;
 
-    event::emit(WorkerPoolEntryEvent {});
+    event::emit(WorkerPoolEntryEvent {
+        nivster: sender,
+    });
 }
 
 /// Removes the caller from the worker pool while retaining their stake.
@@ -473,7 +484,9 @@ public fun leave_worker_pool(self: &mut Court, ctx: &mut TxContext) {
 
     remove_from_worker_pool(self, sender, stake.worker_pool_pos);
 
-    event::emit(WorkerPoolDepartEvent {});
+    event::emit(WorkerPoolDepartEvent {
+        nivster: sender,
+    });
 }
 
 /// Opens a new dispute in the specified court for a given contract.
@@ -584,6 +597,7 @@ public fun open_dispute(
         parties,
         options,
         response_period_ms: self.timetable.default_response_period_ms,
+        draw_period_ms: self.timetable.default_draw_period_ms,
         evidence_period_ms: self.timetable.default_evidence_period_ms,
         voting_period_ms: self.timetable.default_voting_period_ms,
         appeal_period_ms: self.timetable.default_appeal_period_ms,
