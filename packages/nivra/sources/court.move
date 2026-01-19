@@ -24,6 +24,7 @@ use nivra::{
         dispute_status_cancelled,
         dispute_status_completed,
         dispute_status_active,
+        dispute_status_draw,
         current_version,
     },
     worker_pool::{WorkerPool, Self},
@@ -43,15 +44,14 @@ use sui::{
     versioned::{Versioned, Self},
     balance::{Balance, Self},
     vec_map::{VecMap, Self},
-    vec_set::{VecSet, Self},
     random::{new_generator, Random},
     table::{Table, Self},
+    vec_set::VecSet,
     clock::Clock,
     coin::Coin,
     sui::SUI,
     event,
 };
-use nivra::court_registry;
 
 // === Constants ===
 // Sanction models
@@ -87,6 +87,7 @@ const EInvalidCoefficientInternal: u64 = 38;
 const EZeroMinStakeInternal: u64 = 40;
 const EInvalidThresholdInternal: u64 = 41;
 const EInvalidKeyConfigInternal: u64 = 42;
+const ENotDrawPeriod: u64 = 43;
 
 #[error]
 const EOptionTooLong: vector<u8> =
@@ -230,6 +231,7 @@ public struct DisputeDetails has drop, store {
 ///    an appeal against the result.
 public struct DefaultTimeTable has drop, store {
     default_response_period_ms: u64,
+    default_draw_period_ms: u64,
     default_evidence_period_ms: u64,
     default_voting_period_ms: u64,
     default_appeal_period_ms: u64,
@@ -300,7 +302,6 @@ public struct CourtInner has store {
 }
 
 // === Events ===
-
 public struct StakeEvent has copy, drop {
     amount: u64,
 }
@@ -346,6 +347,10 @@ public struct DisputeAcceptEvent has copy, drop {
     fee: u64,
 }
 
+public struct DisputeInitDrawEvent has copy, drop {
+    dispute_id: ID,
+}
+
 public struct DisputeTieEvent has copy, drop {
     dispute_id: ID,
 }
@@ -356,10 +361,13 @@ public struct DisputeCancelEvent has copy, drop {
 
 public struct DisputeOneSidedCompletionEvent has copy, drop {
     dispute_id: ID,
+    winner_party: address,
 }
 
 public struct DisputeCompletionEvent has copy, drop {
     dispute_id: ID,
+    winner_party: address,
+    winner_option: String,
 }
 
 public struct RewardEvent has copy, drop {
@@ -373,6 +381,16 @@ public struct PenaltyEvent has copy, drop {
     nivster: address,
     penalty: u64,
     stake_unlocked: u64,
+}
+
+public struct NivsterSelectionEvent has copy, drop {
+    dispute_id: ID,
+    nivster: address,
+}
+
+public struct NivsterReselectionEvent has copy, drop {
+    dispute_id: ID,
+    nivster: address,
 }
 
 // === Public Functions ===
@@ -571,7 +589,6 @@ entry fun open_dispute(
     parties: vector<address>,
     options: vector<String>,
     max_appeals: u8,
-    r: &Random,
     clock: &Clock, 
     ctx: &mut TxContext
 ) {
@@ -618,22 +635,19 @@ entry fun open_dispute(
         EDisputeAlreadyExists
     );
 
-    // Draw initial nivsters to the case.
-    let mut nivsters = linked_table::new(ctx);
-    draw_nivsters(self, &mut nivsters, INIT_NIVSTER_COUNT, r, ctx);
-
     let dispute_id = create_dispute(
         ctx.sender(),
         contract,
         court_id,
         description,
         self.timetable.default_response_period_ms,
+        self.timetable.default_draw_period_ms,
         self.timetable.default_evidence_period_ms, 
         self.timetable.default_voting_period_ms, 
         self.timetable.default_appeal_period_ms, 
         max_appeals, 
         parties, 
-        nivsters, 
+        linked_table::new(ctx), 
         options, 
         self.key_servers, 
         self.public_keys, 
@@ -686,6 +700,33 @@ entry fun open_dispute(
     });
 
     self.reward_pool.join(fee.into_balance());
+}
+
+entry fun draw_initial_nivsters(
+    court: &mut Court,
+    dispute: &mut Dispute,
+    clock: &Clock,
+    r: &Random,
+    ctx: &mut TxContext,
+) {
+    assert!(dispute.is_draw_period(clock), ENotDrawPeriod);
+
+    let self = court.load_inner_mut();
+    let dispute_id = object::id(dispute);
+
+    self.draw_nivsters(
+        dispute.voters_mut(), 
+        INIT_NIVSTER_COUNT, 
+        dispute_id,
+        r, 
+        ctx
+    );
+
+    dispute.set_status(dispute_status_active());
+
+    event::emit(DisputeInitDrawEvent { 
+        dispute_id 
+    });
 }
 
 /// Starts a new appeal round for an existing dispute.
@@ -746,7 +787,15 @@ entry fun open_appeal(
     // & i = appeal count.
     let nivster_count = std::u64::pow(2, appeal_count - 1) * 
     (INIT_NIVSTER_COUNT + 1);
-    self.draw_nivsters(dispute.voters_mut(), nivster_count, r, ctx);
+    let dispute_id = object::id(dispute);
+
+    self.draw_nivsters(
+        dispute.voters_mut(), 
+        nivster_count, 
+        dispute_id,
+        r, 
+        ctx
+    );
 
     let case = self.cases.borrow_mut(dispute.contract());
     // Both depositors must exist by now since appeal can be only raised after
@@ -760,7 +809,7 @@ entry fun open_appeal(
     dispute.start_new_round_appeal(clock, ctx);
 
     event::emit(DisputeAppealEvent { 
-        dispute_id: object::id(dispute), 
+        dispute_id, 
         initiator_party: cap.party(),
         fee: fee.value(),
     });
@@ -827,14 +876,15 @@ public fun accept_dispute(
         let (_, balance_2) = depositors.get_entry_by_idx(1);
 
         assert!(*balance_1 == *balance_2, EWrongParty);
-    } else {
-        assert!(!depositors.contains(&cap.party()), EWrongParty);
-        // Dispute opening scenario. The other party has not made deposits yet.
-        depositors.insert(cap.party(), fee.value());
-    };
 
-    // Dispute status is set to active after the other party accepts the case.
-    dispute.set_status(dispute_status_active());
+        dispute.set_status(dispute_status_active());
+    } else {
+        // Dispute opening scenario. The other party has not made deposits yet.
+        assert!(!depositors.contains(&cap.party()), EWrongParty);
+        depositors.insert(cap.party(), fee.value());
+
+        dispute.set_status(dispute_status_draw());
+    };
 
     event::emit(DisputeAcceptEvent {
         dispute_id: object::id(dispute),
@@ -863,11 +913,18 @@ entry fun handle_dispute_tie(
     assert!(dispute.is_appeal_period_tie(clock), EDisputeNotTie);
 
     let court = court.load_inner_mut();
-    court.draw_nivsters(dispute.voters_mut(), TIE_NIVSTER_COUNT, r, ctx);
+    let dispute_id = object::id(dispute);
+    court.draw_nivsters(
+        dispute.voters_mut(), 
+        TIE_NIVSTER_COUNT, 
+        dispute_id,
+        r, 
+        ctx
+    );
     dispute.start_new_round_tie(clock, ctx);
 
     event::emit(DisputeTieEvent { 
-        dispute_id: object::id(dispute), 
+        dispute_id, 
     });
 }
 
@@ -1002,11 +1059,12 @@ public fun resolve_one_sided_dispute(
         );
     };
 
-    dispute.set_status(dispute_status_completed_one_sided());
-
     event::emit(DisputeOneSidedCompletionEvent { 
         dispute_id: object::id(dispute),
+        winner_party: *refund_party,
     });
+
+    dispute.set_status(dispute_status_completed_one_sided());
 }
 
 /// Finalizes a fully adjudicated dispute after voting and tallying have 
@@ -1103,6 +1161,9 @@ public fun complete_dispute(
 
     event::emit(DisputeCompletionEvent { 
         dispute_id: object::id(dispute),
+        winner_party,
+        winner_option: 
+        dispute.options()[dispute.winner_option().extract() as u64],
     });
 }
 
@@ -1395,6 +1456,7 @@ public fun create_court(
     dispute_fee: u64,
     min_stake: u64,
     default_response_period_ms: u64,
+    default_draw_period_ms: u64,
     default_evidence_period_ms: u64,
     default_voting_period_ms: u64,
     default_appeal_period_ms: u64,
@@ -1437,6 +1499,7 @@ public fun create_court(
         min_stake,
         timetable: DefaultTimeTable {
             default_response_period_ms,
+            default_draw_period_ms,
             default_evidence_period_ms,
             default_voting_period_ms,
             default_appeal_period_ms,
@@ -1517,6 +1580,7 @@ public fun change_timetable(
     cap: &NivraAdminCap, 
     court_registry: &CourtRegistry,
     default_response_period_ms: u64,
+    default_draw_period_ms: u64,
     default_evidence_period_ms: u64,
     default_voting_period_ms: u64,
     default_appeal_period_ms: u64,
@@ -1525,6 +1589,7 @@ public fun change_timetable(
 
     let self = self.load_inner_mut();
     self.timetable.default_response_period_ms = default_response_period_ms;
+    self.timetable.default_draw_period_ms = default_draw_period_ms;
     self.timetable.default_evidence_period_ms = default_evidence_period_ms;
     self.timetable.default_voting_period_ms = default_voting_period_ms;
     self.timetable.default_appeal_period_ms = default_appeal_period_ms;
@@ -1633,6 +1698,7 @@ public(package) fun draw_nivsters(
     self: &mut CourtInner, 
     nivsters: &mut LinkedTable<address, VoterDetails>, 
     nivster_count: u64,
+    dispute_id: ID,
     r: &Random,
     ctx: &mut TxContext,
 ) {
@@ -1670,11 +1736,21 @@ public(package) fun draw_nivsters(
             // Nivster was already chosen in a previous draw, vote count is incremented by 1.
             let nivster_details = nivsters.borrow_mut(n_addr);
             nivster_details.increment_votes();
-            nivster_details.increase_stake(self.min_stake)
+            nivster_details.increase_stake(self.min_stake);
+
+            event::emit(NivsterReselectionEvent { 
+                dispute_id, 
+                nivster: n_addr,
+            });
         } else {
             nivsters.push_back(n_addr, create_voter_details(
                 self.min_stake
             ));
+
+            event::emit(NivsterSelectionEvent { 
+                dispute_id, 
+                nivster: n_addr, 
+            });
         };
 
         // Narrow the selection range by nivster's stake amount.

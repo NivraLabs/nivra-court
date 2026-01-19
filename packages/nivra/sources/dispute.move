@@ -27,6 +27,7 @@ use seal::bf_hmac_encryption::{
 };
 use nivra::constants::{
     dispute_status_response,
+    dispute_status_draw,
     dispute_status_active,
     dispute_status_tallied,
     dispute_status_tie
@@ -127,10 +128,12 @@ public struct VoterDetails has copy, drop, store {
 public struct TimeTable has copy, drop, store {
     round_init_ms: u64,
     response_period_ms: u64,
+    draw_period_ms: u64,
     evidence_period_ms: u64,
     voting_period_ms: u64,
     appeal_period_ms: u64,
     response_swap: u64,
+    evidence_swap: u64,
 }
 
 /// Economic parameters snapshot inherited from the court at dispute creation.
@@ -186,6 +189,8 @@ public struct Dispute has key {
     serialized_config: vector<u8>,
     economic_params: EconomicParams,
 }
+
+// === Events ===
 
 // === Public Functions ===
 public fun finalize_vote(
@@ -285,18 +290,29 @@ public fun is_response_period(dispute: &Dispute, clock: &Clock): bool {
     current_time <= response_period_end && dispute.status == dispute_status_response()
 }
 
-public fun is_evidence_period(dispute: &Dispute, clock: &Clock): bool {
+public fun is_draw_period(dispute: &Dispute, clock: &Clock): bool {
     let tt = dispute.timetable;
-    let evidence_period_end = tt.round_init_ms + tt.response_period_ms + tt.evidence_period_ms;
+    let draw_period_end = tt.round_init_ms + tt.response_period_ms + 
+    tt.draw_period_ms;
     let current_time = clock.timestamp_ms();
 
-    // Start the evidence period soon as other party has responded (status = active)
+    current_time <= draw_period_end && dispute.status == dispute_status_draw()
+}
+
+public fun is_evidence_period(dispute: &Dispute, clock: &Clock): bool {
+    let tt = dispute.timetable;
+    let evidence_period_end = tt.round_init_ms + tt.response_period_ms + 
+    tt.draw_period_ms + tt.evidence_period_ms;
+    let current_time = clock.timestamp_ms();
+
+    // Start the evidence period soon as the status = active
     current_time <= evidence_period_end && dispute.status == dispute_status_active()
 }
 
 public fun is_voting_period(dispute: &Dispute, clock: &Clock): bool {
     let tt = dispute.timetable;
-    let voting_period_start = tt.round_init_ms + tt.response_period_ms + tt.evidence_period_ms;
+    let voting_period_start = tt.round_init_ms + tt.response_period_ms + 
+    tt.draw_period_ms + tt.evidence_period_ms;
     let voting_period_end = voting_period_start + tt.voting_period_ms;
     let current_time = clock.timestamp_ms();
 
@@ -305,7 +321,8 @@ public fun is_voting_period(dispute: &Dispute, clock: &Clock): bool {
 
 public fun is_appeal_period_untallied(dispute: &Dispute, clock: &Clock): bool {
     let tt = dispute.timetable;
-    let appeal_period_start = tt.round_init_ms + tt.response_period_ms + tt.evidence_period_ms + tt.voting_period_ms;
+    let appeal_period_start = tt.round_init_ms + tt.response_period_ms + 
+    tt.draw_period_ms + tt.evidence_period_ms + tt.voting_period_ms;
     let appeal_period_end = appeal_period_start + tt.appeal_period_ms;
     let current_time = clock.timestamp_ms();
 
@@ -314,7 +331,8 @@ public fun is_appeal_period_untallied(dispute: &Dispute, clock: &Clock): bool {
 
 public fun is_appeal_period_tallied(dispute: &Dispute, clock: &Clock): bool {
     let tt = dispute.timetable;
-    let appeal_period_start = tt.round_init_ms + tt.response_period_ms + tt.evidence_period_ms + tt.voting_period_ms;
+    let appeal_period_start = tt.round_init_ms + tt.response_period_ms + 
+    tt.draw_period_ms + tt.evidence_period_ms + tt.voting_period_ms;
     let appeal_period_end = appeal_period_start + tt.appeal_period_ms;
     let current_time = clock.timestamp_ms();
 
@@ -323,7 +341,8 @@ public fun is_appeal_period_tallied(dispute: &Dispute, clock: &Clock): bool {
 
 public fun is_appeal_period_tie(dispute: &Dispute, clock: &Clock): bool {
     let tt = dispute.timetable;
-    let appeal_period_start = tt.round_init_ms + tt.response_period_ms + tt.evidence_period_ms + tt.voting_period_ms;
+    let appeal_period_start = tt.round_init_ms + tt.response_period_ms + 
+    tt.draw_period_ms + tt.evidence_period_ms + tt.voting_period_ms;
     let appeal_period_end = appeal_period_start + tt.appeal_period_ms;
     let current_time = clock.timestamp_ms();
 
@@ -333,7 +352,9 @@ public fun is_appeal_period_tie(dispute: &Dispute, clock: &Clock): bool {
 // Dispute ended as completed and is ready for reward distribution.
 public fun is_completed(dispute: &Dispute, clock: &Clock): bool {
     let tt = dispute.timetable;
-    let timetable_end = tt.round_init_ms + tt.response_period_ms + tt.evidence_period_ms + tt.voting_period_ms + tt.appeal_period_ms;
+    let timetable_end = tt.round_init_ms + tt.response_period_ms + 
+    tt.draw_period_ms + tt.evidence_period_ms + tt.voting_period_ms + 
+    tt.appeal_period_ms;
     let current_time = clock.timestamp_ms();
 
     current_time > timetable_end && dispute.status == dispute_status_tallied()
@@ -342,10 +363,20 @@ public fun is_completed(dispute: &Dispute, clock: &Clock): bool {
 // Dispute ended as uncompleted (votes not tallied or unresolved tie) and is ready be cancelled.
 public fun is_incomplete(dispute: &Dispute, clock: &Clock): bool {
     let tt = dispute.timetable;
-    let timetable_end = tt.round_init_ms + tt.response_period_ms + tt.evidence_period_ms + tt.voting_period_ms + tt.appeal_period_ms;
+    let draw_period_end = tt.round_init_ms + tt.response_period_ms + 
+    tt.draw_period_ms;
+    let timetable_end = draw_period_end + tt.evidence_period_ms + 
+    tt.voting_period_ms + tt.appeal_period_ms;
     let current_time = clock.timestamp_ms();
 
-    current_time > timetable_end && (dispute.status == dispute_status_active() || dispute.status == dispute_status_tie())
+    let untallied_or_unresolved_tie = 
+    current_time > timetable_end && (dispute.status == dispute_status_active() 
+    || dispute.status == dispute_status_tie());
+
+    let no_init_nivsters = 
+    current_time > draw_period_end && dispute.status == dispute_status_draw();
+
+    no_init_nivsters || untallied_or_unresolved_tie
 }
 
 public fun party_failed_payment(dispute: &Dispute, clock: &Clock): bool {
@@ -507,6 +538,8 @@ public(package) fun start_new_round_appeal(dispute: &mut Dispute, clock: &Clock,
     dispute.status = dispute_status_response();
     // Use swap value for response period in case a tie round occured in-between and it was zeroed.
     dispute.timetable.response_period_ms = dispute.timetable.response_swap;
+    dispute.timetable.draw_period_ms = 0;
+    dispute.timetable.evidence_period_ms = dispute.timetable.evidence_swap;
     dispute.timetable.round_init_ms = clock.timestamp_ms();
     // Increase round.
     dispute.round = dispute.round + 1;
@@ -526,9 +559,11 @@ public(package) fun start_new_round_appeal(dispute: &mut Dispute, clock: &Clock,
 }
 
 public(package) fun start_new_round_tie(dispute: &mut Dispute, clock: &Clock, ctx: &mut TxContext) {
-    // Skip response period as it's not required in tie rounds.
+    // Skip response & evidence periods in tie rounds.
     dispute.status = dispute_status_active();
     dispute.timetable.response_period_ms = 0;
+    dispute.timetable.draw_period_ms = 0;
+    dispute.timetable.evidence_period_ms = 0;
     dispute.timetable.round_init_ms = clock.timestamp_ms();
     // Increase round.
     dispute.round = dispute.round + 1;
@@ -622,6 +657,7 @@ public(package) fun create_dispute(
     court: ID,
     description: String,
     response_period_ms: u64,
+    draw_period_ms: u64,
     evidence_period_ms: u64,
     voting_period_ms: u64,
     appeal_period_ms: u64,
@@ -653,10 +689,12 @@ public(package) fun create_dispute(
         timetable: TimeTable {
             round_init_ms: clock.timestamp_ms(),
             response_period_ms,
+            draw_period_ms,
             evidence_period_ms,
             voting_period_ms,
             appeal_period_ms,
             response_swap: response_period_ms,
+            evidence_swap: evidence_period_ms,
         },
         max_appeals,
         appeals_used: 0,

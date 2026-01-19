@@ -256,7 +256,7 @@ fun add_bit_idx(self: &mut WorkerPool, idx: u64, val: u64) {
     while (i <= SIZE) {
         add_bit_individual_idx(self, i - 1, val);
 
-        i = i + (i & (bitwise_not(i) + 1)); // i += i & -i
+        i = i + (i & (bitwise_not(i) + 1));
     }
 }
 
@@ -266,7 +266,7 @@ fun sub_bit_idx(self: &mut WorkerPool, idx: u64, val: u64) {
     while (i <= SIZE) {
         sub_bit_individual_idx(self, i - 1, val);
 
-        i = i + (i & (bitwise_not(i) + 1)); // i += i & -i
+        i = i + (i & (bitwise_not(i) + 1));
     }
 }
 

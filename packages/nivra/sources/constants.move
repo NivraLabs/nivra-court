@@ -6,12 +6,13 @@ module nivra::constants;
 const CURRENT_VERSION: u64 = 1;
 
 const DISPUTE_STATUS_RESPONSE: u64 = 1;
-const DISPUTE_STATUS_ACTIVE: u64 = 2;
-const DISPUTE_STATUS_TIE: u64 = 3;
-const DISPUTE_STATUS_TALLIED: u64 = 4;
-const DISPUTE_STATUS_COMPLETED: u64 = 5;
-const DISPUTE_STATUS_COMPLETED_ONE_SIDED: u64 = 6;
-const DISPUTE_STATUS_CANCELLED: u64 = 7;
+const DISPUTE_STATUS_DRAW: u64 = 2;
+const DISPUTE_STATUS_ACTIVE: u64 = 3;
+const DISPUTE_STATUS_TIE: u64 = 4;
+const DISPUTE_STATUS_TALLIED: u64 = 5;
+const DISPUTE_STATUS_COMPLETED: u64 = 6;
+const DISPUTE_STATUS_COMPLETED_ONE_SIDED: u64 = 7;
+const DISPUTE_STATUS_CANCELLED: u64 = 8;
 
 // === Public Functions ===
 public fun current_version(): u64 {
@@ -20,6 +21,10 @@ public fun current_version(): u64 {
 
 public fun dispute_status_response(): u64 {
     DISPUTE_STATUS_RESPONSE
+}
+
+public fun dispute_status_draw(): u64 {
+    DISPUTE_STATUS_DRAW
 }
 
 public fun dispute_status_active(): u64 {
