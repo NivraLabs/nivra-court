@@ -51,45 +51,18 @@ const EInvalidDispute: u64 = 11;
 const EInvalidDerivedKeyAmount: u64 = 12;
 
 // === Structs ===
-/// Capability granting authorization to call party-restricted functions.
-/// 
-/// A `PartyCap` proves that the holder is a recognized party in a specific
-/// dispute. It is required to perform actions such as:
-/// - accepting a dispute
-/// - submitting evidence for the dispute
-///
-/// This capability is bound to a single dispute and a single party address.
 public struct PartyCap has key, store {
     id: UID,
     dispute_id: ID,
     party: address,
 }
 
-/// Capability granting authorization to call voter-restricted functions.
-/// 
-/// A `VoterCap` proves that the holder is an eligible voter in a specific
-/// dispute. It is required to perform actions such as:
-/// - casting votes
-/// - collecting voter rewards
-///
-/// This capability is bound to a single dispute and a single voter address.
 public struct VoterCap has key, store {
     id: UID,
     dispute_id: ID,
     voter: address,
 }
 
-/// Internal state associated with a voter in a dispute.
-///
-/// Fields:
-/// - `stake`: Amount of stake locked by the voter for this dispute
-/// - `votes`: Number of voting power units assigned to the voter
-/// - `vote`: Encrypted vote submitted for the current voting round, if any
-/// - `decrypted_vote`: Decrypted vote value for the round, once revealed
-/// - `decrypted_party_vote`: Decrypted party vote for the round, once revealed
-/// - `cap_issued`: Whether a `VoterCap` has been issued to this voter
-/// - `reward_collected`: Whether the voter has already collected rewards for 
-///    this dispute
 public struct VoterDetails has copy, drop, store {
     stake: u64,
     votes: u64,
@@ -100,31 +73,6 @@ public struct VoterDetails has copy, drop, store {
     reward_collected: bool,
 }
 
-/// Dispute timetable defining all time-based parameters for a single round.
-///
-/// All time values are expressed in milliseconds and define a strictly ordered
-/// sequence of periods starting at `round_init_ms`.
-///
-/// Period order:
-/// 1. Response period
-/// 2. Evidence period
-/// 3. Voting period
-/// 4. Appeal period
-///
-/// Special case:
-/// - In tie rounds, `response_period_ms` is set to `0`, causing the round to
-///   skip directly to the evidence period.
-/// 
-/// Fields:
-/// - `round_init_ms`: Timestamp (in ms) at which the round starts
-/// - `response_period_ms`: Duration (in ms) during which the counterparty may 
-///    accept the dispute. Set to `0` to skip this phase
-/// - `evidence_period_ms`: Duration (in ms) for submitting evidence
-/// - `voting_period_ms`: Duration (in ms) for casting votes
-/// - `appeal_period_ms`: Duration (in ms) for vote tallying and submitting 
-///    appeals
-/// - `response_swap`: Original response period duration, preserved when
-///   `response_period_ms` is temporarily set to `0` (e.g. tie rounds)
 public struct TimeTable has copy, drop, store {
     round_init_ms: u64,
     response_period_ms: u64,
@@ -136,25 +84,6 @@ public struct TimeTable has copy, drop, store {
     evidence_swap: u64,
 }
 
-/// Economic parameters snapshot inherited from the court at dispute creation.
-///
-/// These parameters are used for all fee, sanction, and reward calculations
-/// throughout the dispute lifecycle, even if the court’s economic model
-/// changes after the dispute is opened.
-///
-/// This ensures deterministic and predictable economic outcomes.
-/// 
-/// Fields:
-/// - `dispute_fee`: Base fee required to open a dispute
-/// - `sanction_model`: Identifier of the sanction model
-/// - `coefficient`: Sanction-model-specific coefficient controlling the 
-///    severity or weight of applied sanctions
-/// - `treasury_share`: Fraction of distributed SUI fees allocated to the 
-///    treasury in percentages scaled by 100
-/// - `treasury_share_nvr`: Fraction of slashed NVR tokens allocated to the 
-///    treasury in percentages scaled by 100
-/// - `empty_vote_penalty`: Penalty applied to voters who fail to cast a vote
-///    in percentages scaled by 100
 public struct EconomicParams has copy, drop, store {
     dispute_fee: u64,
     sanction_model: u64,
@@ -537,7 +466,7 @@ public(package) fun increase_stake(
 public(package) fun start_new_round_appeal(dispute: &mut Dispute, clock: &Clock, ctx: &mut TxContext) {
     // Start from response period as the opponent is required to make an additional deposit.
     dispute.status = dispute_status_response();
-    // Use swap value for response period in case a tie round occured in-between and it was zeroed.
+    // Use swap values in case a tie round occured in-between and it was zeroed.
     dispute.timetable.response_period_ms = dispute.timetable.response_swap;
     dispute.timetable.draw_period_ms = 0;
     dispute.timetable.evidence_period_ms = dispute.timetable.evidence_swap;

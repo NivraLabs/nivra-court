@@ -174,31 +174,11 @@ const EDisputeNotTie: vector<u8> =
 b"Dispute outcome is not tied.";
 
 // === Structs ===
-/// Court operational status.
-/// 
-/// - `Running`: The court is fully operational.
-/// - `Halted`: The court is temporarily closed. User actions such as staking, 
-///    joining the worker pool, and opening disputes are disabled.
 public enum Status has copy, drop, store {
     Running,
     Halted,
 }
 
-/// Per-user staking state within a court.
-///
-/// Tracks the user's deposited stake, locked stake committed to active cases,
-/// accumulated rewards, and worker pool participation status.
-/// 
-/// Fields:
-/// - `amount`: Available NVR stake not currently locked in disputes.
-///    The `amount` must always match the worker pool amount. Denominated
-///    in the smallest unit of NVR (1e-6 NVR).
-/// - `locked_amount`: NVR stake locked as collateral for active cases.
-///    Denominated in the smallest unit of NVR (1e-6 NVR).
-/// - `reward_amount`: Accumulated rewards denominated in MIST.
-/// - `in_worker_pool`: Whether the user is currently enrolled in the worker 
-///    pool.
-/// - `worker_pool_pos`: Position in the worker pool.
 public struct Stake has drop, store {
     amount: u64,
     locked_amount: u64,
@@ -207,28 +187,11 @@ public struct Stake has drop, store {
     worker_pool_pos: u64,
 }
 
-/// Per-contract dispute data.
-/// 
-/// Fields:
-/// - `dispute_id`: Unique identifier of the dispute case.
-/// - `depositors`: Mapping of dispute parties to the amount of SUI
-///    they have deposited for fees and appeals, denominated in MIST.
 public struct DisputeDetails has drop, store {
     dispute_id: ID,
     depositors: VecMap<address, u64>,
 }
 
-/// Default dispute timeline parameters provided by the court.
-/// 
-/// Fields:
-/// - `default_response_period_ms`: Time window during which the opposing party
-///    must respond by matching the dispute opening or appeal fee.
-/// - `default_evidence_period_ms`: Time window during which parties may submit
-///    evidence for the dispute.
-/// - `default_voting_period_ms`: Time window during which nivsters may cast 
-///    votes.
-/// - `default_appeal_period_ms`: Time window for tallying votes and submitting
-///    an appeal against the result.
 public struct DefaultTimeTable has drop, store {
     default_response_period_ms: u64,
     default_draw_period_ms: u64,
@@ -237,48 +200,11 @@ public struct DefaultTimeTable has drop, store {
     default_appeal_period_ms: u64,
 }
 
-/// Versioned wrapper for the Court.
-///
-/// This struct enables safe upgrades of the court by encapsulating versioned 
-/// internal state.
 public struct Court has key {
     id: UID,
     inner: Versioned,
 }
 
-/// Internal state of the Court.
-/// 
-/// Contains all configuration parameters, economic settings, participant
-/// state, and active dispute tracking required for court operation.
-/// 
-/// Fields:
-/// - `allowed_versions`: A list of allowed nivra package versions.
-/// - `status`: Current operational status of the court.
-/// - `ai_court`: Whether the court is classified as an AI-specific court.
-/// - `sanction_model`: Identifier of the sanction model applied by the court.
-/// - `coefficient`: Model-specific coefficient used by the sanction model,
-///    expressed as a percentage (scaled by 100).
-/// - `treasury_share`: Share of SUI rewards allocated to the Nivra treasury,
-///    expressed as a percentage (scaled by 100).
-/// - `treasury_share_nvr`: Share of NVR rewards allocated to the Nivra treasury
-///    , expressed as a percentage (scaled by 100).
-/// - `empty_vote_penalty`: Penalty applied for failing to submit a vote,
-///    expressed as a percentage (scaled by 100).
-/// - `dispute_fee`: Fee required to open a dispute, denominated in MIST.
-/// - `min_stake`: Minimum NVR stake required to participate as a nivster.
-///    Denominated in the smallest unit of NVR (1e-6 NVR).
-/// - `timetable`: Default dispute timing parameters used when a case does not
-///    override its timeline.
-/// - `cases`: Mapping of contract IDs to mapping of serialized dispute config
-///    to dispute data. Prevents duplicate disputes for the same contract.
-///    Use `serialize_dispute_config` to get the serialized dispute config.
-/// - `stakes`: Per-user stake records maintained by the court.
-/// - `worker_pool`: Pool of eligible nivsters available for case assignment.
-/// - `stake_pool`: Custody balance holding all staked NVR tokens.
-/// - `reward_pool`: Custody balance holding all deposited SUI fees and rewards.
-/// - `key_servers`: Seal key servers used in disputes.
-/// - `public_keys`: Seal public keys corresponding the key servers.
-/// - `threshold`: Encryption threshold (t of n key servers) for disputes.
 public struct CourtInner has store {
     allowed_versions: VecSet<u64>,
     status: Status,
@@ -551,33 +477,7 @@ public fun leave_worker_pool(self: &mut Court, ctx: &mut TxContext) {
 }
 
 /// Opens a new dispute in the specified court for a given contract.
-/// 
-/// The caller initiates a dispute by paying the court’s dispute fee and
-/// specifying the involved parties, voting options, and dispute parameters.
-/// An initial set of jurors ("nivsters") is randomly selected from the worker
-/// pool using stake-weighted selection.
-/// 
-/// The caller must be one of the dispute parties. Only one dispute with same
-/// configs may exist per contract at any given time.
-/// 
-/// Aborts if:
-/// - The court is not in the `Running` state
-/// - The provided fee does not match the court’s required dispute fee
-/// - The number of voting options is outside the allowed range
-/// - The number of parties is not exactly two
-/// - The caller is not one of the dispute parties
-/// - The maximum number of appeals exceeds the court’s limit
-/// - A dispute has already been opened for the contract ID with specified 
-///   configs
-/// - The worker pool does not contain enough eligible nivsters to initialize 
-///   the case
-/// - The description length is too long
-/// - The option length is too long
-/// - The options are not unique
-/// 
-/// Emits:
-/// - `DisputeCreationEvent` recording the creation of a new dispute
-entry fun open_dispute(
+public fun open_dispute(
     court: &mut Court,
     fee: Coin<SUI>,
     contract: ID,
@@ -698,6 +598,7 @@ entry fun open_dispute(
     self.reward_pool.join(fee.into_balance());
 }
 
+/// Draws initial nivsters after both parties have accepted the case
 entry fun draw_initial_nivsters(
     court: &mut Court,
     dispute: &mut Dispute,
@@ -811,27 +712,6 @@ entry fun open_appeal(
 
 /// Accepts an open dispute or appeal by the opposing party and deposits
 /// the required response fee.
-/// 
-/// The responding party must pay a fee `F`, defined as:
-/// 
-/// `F = (13/5)^i * Fn`
-/// 
-/// where:
-/// - `i` is the current appeal count
-/// - `Fn` is the court's base dispute fee
-/// 
-/// The fee must be paid by the party that has not yet matched the
-/// opposing party’s deposit. Once both parties have deposited equal
-/// amounts, the dispute becomes active.
-/// 
-/// Aborts if:
-/// - The provided party capability does not correspond to the dispute
-/// - The dispute is not in a response period
-/// - The fee amount is incorrect
-/// - The fee is paid by the wrong party
-/// 
-/// Emits:
-/// - `DisputeAcceptEvent` recording the dispute accept
 public fun accept_dispute(
     court: &mut Court,
     dispute: &mut Dispute,
