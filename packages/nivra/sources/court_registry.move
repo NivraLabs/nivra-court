@@ -41,13 +41,11 @@ public struct NivraAdminCap has key, store {
 /// - `description`: A description of the court’s scope, topics, and governing 
 ///    rules.
 /// - `skills`: A description of the skills required to participate.
-/// - `min_stake`: The minimum NVR stake required for participation.
 public struct CourtMetadata has copy, drop, store {
     category: String,            
     name: String,                         
     description: String,         
-    skills: String,  
-    min_stake: u64,
+    skills: String,
 }
 
 /// Versioned wrapper for the Court Registry.
@@ -236,6 +234,25 @@ public fun set_treasury_address(
     self.treasury_address = treasury_address;
 }
 
+public fun change_court_metadata(
+    self: &mut CourtRegistry, 
+    cap: &NivraAdminCap,
+    court_id: ID,
+    category: String,
+    name: String,
+    description: String,
+    skills: String,
+) {
+    self.validate_admin_privileges(cap);
+
+    let self = self.load_inner_mut();
+    let metadata = self.courts.borrow_mut(court_id);
+    metadata.category = category;
+    metadata.name = name;
+    metadata.description = description;
+    metadata.skills = skills;
+}
+
 /// Enables a package version.
 ///
 /// Aborts if:
@@ -295,14 +312,12 @@ public(package) fun create_metadata(
     name: String,
     description: String,
     skills: String,
-    min_stake: u64,
 ): CourtMetadata {
     CourtMetadata {
         category,
         name,
         description,
         skills,
-        min_stake,
     }
 }
 

@@ -51,6 +51,7 @@ use sui::{
     sui::SUI,
     event,
 };
+use nivra::court_registry;
 
 // === Constants ===
 // Sanction models
@@ -460,6 +461,8 @@ public fun withdraw(
     // Deduct amounts.
     stake.amount = stake.amount - amount_nvr;
     stake.reward_amount = stake.reward_amount - amount_sui;
+
+    //TODO: prevent withdrawal that leave nvr balance less than min stake
 
     // Automatically update worker pool stake or remove the caller
     // if the remaining stake falls below the minimum threshold.
@@ -1190,8 +1193,8 @@ public fun collect_rewards_one_sided(
     if (appeals_used >= 1) {
         let total_stake_sum = dispute.total_stake_sum();
         let total_cut = nivsters_take(
-            self.dispute_fee, 
-            self.treasury_share, 
+            dispute.dispute_fee(), 
+            dispute.treasury_share(), 
             appeals_used - 1,
             INIT_NIVSTER_COUNT
         );
@@ -1423,7 +1426,7 @@ public fun create_court(
     };
 
     let court_inner = CourtInner {
-        allowed_versions: vec_set::singleton(current_version()),
+        allowed_versions: court_registry.allowed_versions(),
         status: Status::Running,
         ai_court,
         sanction_model,
@@ -1463,8 +1466,7 @@ public fun create_court(
         category, 
         name, 
         description, 
-        skills, 
-        min_stake, 
+        skills,
     );
 
     court_registry.register_court(court_id, metadata);
@@ -1486,6 +1488,118 @@ public fun halt_operation(
 
     let self = self.load_inner_mut();
     self.status = Status::Halted;
+}
+
+public fun start_operation(
+    self: &mut Court, 
+    cap: &NivraAdminCap, 
+    court_registry: &CourtRegistry
+) {
+    court_registry.validate_admin_privileges(cap);
+
+    let self = self.load_inner_mut();
+    self.status = Status::Running;
+}
+
+public fun change_dispute_fee(
+    self: &mut Court, 
+    cap: &NivraAdminCap, 
+    court_registry: &CourtRegistry,
+    dispute_fee: u64
+) {
+    court_registry.validate_admin_privileges(cap);
+
+    let self = self.load_inner_mut();
+    self.dispute_fee = dispute_fee;
+}
+
+public fun change_timetable(
+    self: &mut Court, 
+    cap: &NivraAdminCap, 
+    court_registry: &CourtRegistry,
+    default_response_period_ms: u64,
+    default_evidence_period_ms: u64,
+    default_voting_period_ms: u64,
+    default_appeal_period_ms: u64,
+) {
+    court_registry.validate_admin_privileges(cap);
+
+    let self = self.load_inner_mut();
+    self.timetable.default_response_period_ms = default_response_period_ms;
+    self.timetable.default_evidence_period_ms = default_evidence_period_ms;
+    self.timetable.default_voting_period_ms = default_voting_period_ms;
+    self.timetable.default_appeal_period_ms = default_appeal_period_ms;
+}
+
+public fun change_sanction_model(
+    self: &mut Court, 
+    cap: &NivraAdminCap, 
+    court_registry: &CourtRegistry,
+    sanction_model: u64,
+    coefficient: u64,
+    empty_vote_penalty: u64,
+) {
+    court_registry.validate_admin_privileges(cap);
+
+    assert!(empty_vote_penalty <= 100, EInvalidSanctionModelInternal);
+    assert!(sanction_model < 3, EInvalidSanctionModelInternal);
+
+    if (sanction_model == FIXED_PERCENTAGE_MODEL) {
+        assert!(coefficient < 100, EInvalidCoefficientInternal);
+    };
+
+    if (sanction_model == MINORITY_SCALED_MODEL || 
+        sanction_model == QUADRATIC_MODEL) {
+        assert!(coefficient <= 100, EInvalidCoefficientInternal);
+    };
+
+    let self = self.load_inner_mut();
+    self.sanction_model = sanction_model;
+    self.coefficient = coefficient;
+    self.empty_vote_penalty = empty_vote_penalty;
+}
+
+public fun change_treasury_share(
+    self: &mut Court, 
+    cap: &NivraAdminCap, 
+    court_registry: &CourtRegistry,
+    treasury_share: u64,
+    treasury_share_nvr: u64,
+) {
+    court_registry.validate_admin_privileges(cap);
+
+    assert!(treasury_share <= 100, EInvalidTreasuryShareInternal);
+    assert!(treasury_share_nvr <= 100, EInvalidTreasuryShareInternal);
+
+    let self = self.load_inner_mut();
+    self.treasury_share = treasury_share;
+    self.treasury_share_nvr = treasury_share_nvr;
+}
+
+public fun change_key_servers(
+    self: &mut Court, 
+    cap: &NivraAdminCap, 
+    court_registry: &CourtRegistry,
+    key_servers: vector<address>,
+    public_keys: vector<vector<u8>>,
+    threshold: u8,
+) {
+    court_registry.validate_admin_privileges(cap);
+
+    assert!(
+        key_servers.length() == public_keys.length(), 
+        EInvalidKeyConfigInternal
+    );
+    assert!(threshold > 0, EInvalidThresholdInternal);
+    assert!(
+        threshold as u64 <= key_servers.length(), 
+        EInvalidThresholdInternal
+    );
+
+    let self = self.load_inner_mut();
+    self.key_servers = key_servers;
+    self.public_keys = public_keys;
+    self.threshold = threshold;
 }
 
 /// Updates court's package versions to match the court registry.

@@ -259,6 +259,7 @@ public fun cast_vote(
     ctx: &mut TxContext,
 ) {
     assert!(dispute.is_voting_period(clock), ENotVotingPeriod);
+    assert!(cap.dispute_id == object::id(dispute), ENotVoter);
     assert!(dispute.voters.contains(cap.voter), ENotVoter);
 
     let encrypted_vote = parse_encrypted_object(encrypted_vote);
