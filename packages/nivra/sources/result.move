@@ -22,6 +22,49 @@ public struct Result has key, store {
 
 // === View Functions ===
 
+public fun has_correct_config(
+    result: &Result,
+    court_id: ID,
+    contract_id: ID,
+    options: &vector<String>,
+    parties: &vector<address>,
+    max_appeals: u8,
+): bool {
+    if (court_id != result.court_id || contract_id != result.contract_id) {
+        return false
+    };
+
+    if (max_appeals != result.max_appeals) {
+        return false
+    };
+
+    if (options.length() != result.options.length()) {
+        return false
+    };
+
+    let mut i = 0;
+
+    while (i < options.length()) {
+        if (!result.options.contains(&options[i])) {
+            return false
+        };
+
+        i = i + 1;
+    };
+
+    i = 0;
+
+    while (i < parties.length()) {
+        if (!result.parties.contains(&parties[i])) {
+            return false
+        };
+
+        i = i + 1;
+    };
+
+    true
+}
+
 public fun court_id(result: &Result): ID {
     result.court_id
 }
@@ -38,16 +81,17 @@ public fun options(result: &Result): vector<String> {
     result.options
 }
 
-public fun winner_option(result: &Result): Option<u8> {
-    result.winner_option
+
+public fun winner_option(result: &Result): Option<String> {
+    result.winner_option.map!(|opt| result.options[opt as u64])
 }
 
 public fun parties(result: &Result): vector<address> {
     result.parties
 }
 
-public fun winner_party(result: &Result): u64 {
-    result.winner_party
+public fun winner_party(result: &Result): address {
+    result.parties[result.winner_party]
 }
 
 public fun max_appeals(result: &Result): u8 {

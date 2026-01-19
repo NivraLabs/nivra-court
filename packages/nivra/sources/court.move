@@ -462,8 +462,6 @@ public fun withdraw(
     stake.amount = stake.amount - amount_nvr;
     stake.reward_amount = stake.reward_amount - amount_sui;
 
-    //TODO: prevent withdrawal that leave nvr balance less than min stake
-
     // Automatically update worker pool stake or remove the caller
     // if the remaining stake falls below the minimum threshold.
     if (stake.in_worker_pool && amount_nvr > 0) {
@@ -584,7 +582,8 @@ entry fun open_dispute(
     assert!(fee.value() == self.dispute_fee, EInvalidFee);
     // Enforce the dispute limitations.
     assert!(
-        options.length() >= MIN_OPTIONS && options.length() <= MAX_OPTIONS, 
+        options.length() == 0 || 
+        (options.length() >= MIN_OPTIONS && options.length() <= MAX_OPTIONS), 
         EInvalidOptionsAmount
     );
     assert!(parties.length() == PARTY_COUNT, EInvalidPartyCount);

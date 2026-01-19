@@ -213,7 +213,7 @@ public fun finalize_vote(
         .key_servers
         .zip_map!(dispute.public_keys, |ks, pk| new_public_key(ks.to_id(), pk));
     
-    let mut result = vector::tabulate!(dispute.options.length() + 1, |_| 0);
+    let mut result = vector::tabulate!(dispute.options.length(), |_| 0);
     let mut party_result = vector::tabulate!(dispute.parties.length(), |_| 0);
     let mut i = linked_table::front(&dispute.voters);
 
@@ -226,7 +226,7 @@ public fun finalize_vote(
             decrypt(vote, &verified_derived_keys, &all_public_keys)
             .do_ref!(|decrypted| {
                 if (decrypted.length() == 2) {
-                    if (decrypted[0] as u64 <= dispute.options.length()) {
+                    if (decrypted[0] as u64 < dispute.options.length()) {
                         let option = decrypted[0];
                         v.decrypted_vote = option::some(option);
                         *&mut result[option as u64] = result[option as u64] + 
