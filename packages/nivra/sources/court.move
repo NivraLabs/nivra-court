@@ -29,6 +29,7 @@ use nivra::{
     },
     worker_pool::{WorkerPool, Self},
     dispute::{
+        distribute_voter_caps,
         create_voter_details,
         create_dispute,
         VoterDetails,
@@ -523,7 +524,10 @@ public fun open_dispute(
 
     while(i < options.length()) {
         let mut j = i + 1;
-        assert!(options[i].length() <= MAX_OPTION_LEN, EOptionTooLong);
+        assert!(
+            options[i].length() > 0 && options[i].length() <= MAX_OPTION_LEN, 
+            EOptionTooLong
+        );
 
         while (j < options.length()) {
             assert!(options[i] != options[j], EDuplicateOptions);
@@ -633,6 +637,7 @@ entry fun draw_initial_nivsters(
         ctx
     );
 
+    distribute_voter_caps(dispute.voters_mut(), dispute_id, ctx);
     dispute.set_status(dispute_status_active());
 }
 

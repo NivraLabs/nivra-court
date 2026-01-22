@@ -666,7 +666,7 @@ public(package) fun create_dispute(
     clock: &Clock,
     ctx: &mut TxContext,
 ): ID {
-    let mut dispute = Dispute {
+    let dispute = Dispute {
         id: object::new(ctx),
         status: dispute_status_response(),
         initiator,
@@ -711,7 +711,6 @@ public(package) fun create_dispute(
     let dispute_id = object::id(&dispute);
 
     distribute_party_caps(dispute.parties, dispute_id, ctx);
-    distribute_voter_caps(&mut dispute.voters, dispute_id, ctx);
     transfer::share_object(dispute);
 
     dispute_id
