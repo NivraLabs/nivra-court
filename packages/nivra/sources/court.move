@@ -320,7 +320,7 @@ public struct DisputeInitialNivstersDrawnEvent has copy, drop {
     initiator: address,
 }
 
-public struct DisputeTieEvent has copy, drop {
+public struct DisputeTieNivstersDrawnEvent has copy, drop {
     dispute_id: ID,
     initiator: address,
 }
@@ -849,7 +849,7 @@ entry fun handle_dispute_tie(
     );
     dispute.start_new_round_tie(clock, ctx);
 
-    event::emit(DisputeTieEvent { 
+    event::emit(DisputeTieNivstersDrawnEvent { 
         dispute_id,
         initiator: ctx.sender(), 
     });

@@ -14,7 +14,8 @@ use sui::{
     linked_table::{Self, LinkedTable},
     clock::Clock,
     vec_map::{Self, VecMap},
-    bls12381::g1_from_bytes
+    bls12381::g1_from_bytes,
+    event
 };
 use seal::bf_hmac_encryption::{
     EncryptedObject,
@@ -122,6 +123,16 @@ public struct Dispute has key {
 }
 
 // === Events ===
+
+public struct DisputeTalliedTieEvent has copy, drop {
+    dispute_id: ID,
+}
+
+public struct DisputeTalliedEvent has copy, drop {
+    dispute_id: ID,
+    winner_option: u8,
+    winner_party: u8,
+}
 
 // === Public Functions ===
 fun init(otw: DISPUTE, ctx: &mut TxContext) {
@@ -591,10 +602,20 @@ public(package) fun tally_votes(dispute: &mut Dispute) {
 
     if (highest_option == second_highest_option || highest_party_option == second_highest_party_option) {
         dispute.status = dispute_status_tie();
+
+        event::emit(DisputeTalliedTieEvent { 
+            dispute_id: object::id(dispute),
+        });
     } else {
         dispute.winner_option = dispute.result.find_index!(|res| res == highest_option).map!(|res| res as u8);
         dispute.winner_party = dispute.party_result.find_index!(|res| res == highest_party_option).map!(|res| res as u8);
         dispute.status = dispute_status_tallied();
+
+        event::emit(DisputeTalliedEvent {
+            dispute_id: object::id(dispute),
+            winner_option: dispute.winner_option.extract(),
+            winner_party: dispute.winner_party.extract(),
+        });
     };
 }
 
