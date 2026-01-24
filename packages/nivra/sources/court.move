@@ -305,33 +305,39 @@ public struct DisputeCreationEvent has copy, drop {
 
 public struct DisputeAppealEvent has copy, drop {
     dispute_id: ID,
-    initiator_party: address,
+    initiator: address,
     fee: u64,
 }
 
 public struct DisputeAcceptEvent has copy, drop {
     dispute_id: ID,
-    accepting_party: address,
+    initiator: address,
     fee: u64,
+}
+
+public struct DisputeInitialNivstersDrawnEvent has copy, drop {
+    dispute_id: ID,
+    initiator: address,
 }
 
 public struct DisputeTieEvent has copy, drop {
     dispute_id: ID,
+    initiator: address,
 }
 
 public struct DisputeCancelEvent has copy, drop {
     dispute_id: ID,
+    initiator: address,
 }
 
 public struct DisputeOneSidedCompletionEvent has copy, drop {
     dispute_id: ID,
-    winner_party: address,
+    initiator: address,
 }
 
 public struct DisputeCompletionEvent has copy, drop {
     dispute_id: ID,
-    winner_party: address,
-    winner_option: String,
+    initiator: address,
 }
 
 public struct NivsterSelectionEvent has copy, drop {
@@ -663,6 +669,11 @@ entry fun draw_initial_nivsters(
 
     distribute_voter_caps(dispute.voters_mut(), dispute_id, ctx);
     dispute.set_status(dispute_status_active());
+
+    event::emit(DisputeInitialNivstersDrawnEvent { 
+        dispute_id, 
+        initiator: ctx.sender(), 
+    });
 }
 
 /// Starts a new appeal round for an existing dispute.
@@ -746,7 +757,7 @@ entry fun open_appeal(
 
     event::emit(DisputeAppealEvent { 
         dispute_id, 
-        initiator_party: cap.party(),
+        initiator: cap.party(),
         fee: fee.value(),
     });
 
@@ -803,7 +814,7 @@ public fun accept_dispute(
 
     event::emit(DisputeAcceptEvent {
         dispute_id: object::id(dispute),
-        accepting_party: cap.party(),
+        initiator: cap.party(),
         fee: fee.value(),
     });
 
@@ -839,7 +850,8 @@ entry fun handle_dispute_tie(
     dispute.start_new_round_tie(clock, ctx);
 
     event::emit(DisputeTieEvent { 
-        dispute_id, 
+        dispute_id,
+        initiator: ctx.sender(), 
     });
 }
 
@@ -888,6 +900,7 @@ public fun cancel_dispute(
 
     event::emit(DisputeCancelEvent { 
         dispute_id: object::id(dispute),
+        initiator: ctx.sender(),
     });
 }
 
@@ -976,7 +989,7 @@ public fun resolve_one_sided_dispute(
 
     event::emit(DisputeOneSidedCompletionEvent { 
         dispute_id: object::id(dispute),
-        winner_party: *refund_party,
+        initiator: ctx.sender(),
     });
 
     dispute.set_status(dispute_status_completed_one_sided());
@@ -1076,9 +1089,7 @@ public fun complete_dispute(
 
     event::emit(DisputeCompletionEvent { 
         dispute_id: object::id(dispute),
-        winner_party,
-        winner_option: 
-        dispute.options()[dispute.winner_option().extract() as u64],
+        initiator: ctx.sender(),
     });
 }
 
@@ -1655,7 +1666,7 @@ public(package) fun draw_nivsters(
         event::emit(WorkerPoolDepartEvent { 
             nivster: n_addr,
         });
-        
+
         // Load nivster's stake.
         let nivster_stake = self.stakes.borrow_mut(n_addr);
 
