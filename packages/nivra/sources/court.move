@@ -229,15 +229,45 @@ public struct CourtInner has store {
 }
 
 // === Events ===
-public struct StakeEvent has copy, drop {
+public struct BalanceDepositEvent has copy, drop {
     nivster: address,
-    amount: u64,
+    amount_nvr: u64,
 }
 
-public struct WithdrawEvent has copy, drop {
+public struct BalanceInitialDepositEvent has copy, drop {
+    nivster: address,
+    amount_nvr: u64,
+}
+
+public struct BalanceWithdrawalEvent has copy, drop {
     nivster: address,
     amount_nvr: u64,
     amount_sui: u64,
+}
+
+public struct BalanceLockedEvent has copy, drop {
+    nivster: address,
+    amount_nvr: u64,
+    dispute_id: ID,
+}
+
+public struct BalanceUnlockedEvent has copy, drop {
+    nivster: address,
+    amount_nvr: u64,
+    dispute_id: ID,
+}
+
+public struct BalanceRewardEvent has copy, drop {
+    nivster: address,
+    amount_nvr: u64,
+    amount_sui: u64,
+    dispute_id: ID,
+}
+
+public struct BalancePenaltyEvent has copy, drop {
+    nivster: address,
+    amount_nvr: u64,
+    dispute_id: ID,
 }
 
 public struct WorkerPoolEntryEvent has copy, drop {
@@ -300,19 +330,6 @@ public struct DisputeCompletionEvent has copy, drop {
     winner_option: String,
 }
 
-public struct RewardEvent has copy, drop {
-    nivster: address,
-    reward_nvr: u64,
-    reward_sui: u64,
-    stake_unlocked: u64,
-}
-
-public struct PenaltyEvent has copy, drop {
-    nivster: address,
-    penalty: u64,
-    stake_unlocked: u64,
-}
-
 public struct NivsterSelectionEvent has copy, drop {
     dispute_id: ID,
     nivster: address,
@@ -334,9 +351,6 @@ public struct NivsterReselectionEvent has copy, drop {
 /// Aborts if:
 /// - The court is not in the `Running` state
 /// - The deposited stake amount is less than the minimum required stake
-/// 
-/// Emits:
-/// - `StakeEvent` recording the sender and staked amount
 public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
     let self = self.load_inner_mut();
     let deposit_amount = assets.value();
@@ -359,6 +373,11 @@ public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
                 deposit_amount
             );
         };
+
+        event::emit(BalanceDepositEvent { 
+            nivster: sender, 
+            amount_nvr: deposit_amount,
+        });
     } else {
         self.stakes.push_back(sender, Stake {
             amount: deposit_amount,
@@ -367,12 +386,12 @@ public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
             in_worker_pool: false,
             worker_pool_pos: 10_001,
         });
-    };
 
-    event::emit(StakeEvent {
-        nivster: sender,
-        amount: deposit_amount, 
-    });
+        event::emit(BalanceInitialDepositEvent { 
+            nivster: sender, 
+            amount_nvr: deposit_amount, 
+        });
+    };
 }
 
 
@@ -389,9 +408,6 @@ public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
 /// Aborts if:
 /// - The caller does not have sufficient NVR stake or SUI rewards
 /// - Both withdrawal amounts are zero
-/// 
-/// Emits:
-/// - `WithdrawEvent` recording the caller and withdrawn amounts
 public fun withdraw(
     self: &mut Court, 
     amount_nvr: u64,
@@ -424,7 +440,7 @@ public fun withdraw(
     let nvr = self.stake_pool.split(amount_nvr).into_coin(ctx);
     let sui = self.reward_pool.split(amount_sui).into_coin(ctx);
 
-    event::emit(WithdrawEvent {
+    event::emit(BalanceWithdrawalEvent {
         nivster: sender,
         amount_nvr,
         amount_sui,
@@ -1069,16 +1085,15 @@ public fun complete_dispute(
 /// Aborts if:
 /// - The dispute is not in the `Cancelled` state
 /// - The juror has already collected their refund
-/// 
-/// Emits:
-/// - `RewardEvent` recording the unlocked stake
 public fun collect_rewards_cancelled(
     court: &mut Court,
     dispute: &mut Dispute,
     cap: &VoterCap,
 ) {
+    let dispute_id = object::id(dispute);
+
     assert!(dispute.status() == dispute_status_cancelled(), EDisputeNotCancelled);
-    assert!(cap.dispute_id_voter() == object::id(dispute), EInvalidVoterCap);
+    assert!(cap.dispute_id_voter() == dispute_id, EInvalidVoterCap);
 
     let self = court.load_inner_mut();
     let voter_details = dispute.voters_mut().borrow_mut(cap.voter());
@@ -1099,11 +1114,10 @@ public fun collect_rewards_cancelled(
         );
     };
 
-    event::emit(RewardEvent {
+    event::emit(BalanceUnlockedEvent {
         nivster: cap.voter(),
-        reward_nvr: 0,
-        reward_sui: 0,
-        stake_unlocked: case_locked_amount,
+        amount_nvr: case_locked_amount,
+        dispute_id,
     });
 }
 
@@ -1117,19 +1131,18 @@ public fun collect_rewards_cancelled(
 /// Aborts if:
 /// - The dispute is not in the `CompletedOneSided` state
 /// - The juror has already collected rewards for this dispute
-/// 
-/// Emits:
-/// - `RewardEvent` recording the unlocked stake and any sui rewards
 public fun collect_rewards_one_sided(
     court: &mut Court,
     dispute: &mut Dispute,
     cap: &VoterCap,
 ) {
+    let dispute_id = object::id(dispute);
+
     assert!(
         dispute.status() == dispute_status_completed_one_sided(), 
         EDisputeNotCompletedOneSided
     );
-    assert!(cap.dispute_id_voter() == object::id(dispute), EInvalidVoterCap);
+    assert!(cap.dispute_id_voter() == dispute_id, EInvalidVoterCap);
 
     let self = court.load_inner_mut();
     let appeals_used = dispute.appeals_used();
@@ -1137,8 +1150,6 @@ public fun collect_rewards_one_sided(
     let stake = self.stakes.borrow_mut(cap.voter());
 
     assert!(!voter_details.reward_collected(), ERewardAlreadyCollected);
-
-    let mut sui_cut = 0;
 
     // Distribute any sui lost by the another party to the nivsters.
     if (appeals_used >= 1) {
@@ -1150,9 +1161,16 @@ public fun collect_rewards_one_sided(
             INIT_NIVSTER_COUNT
         );
 
-        sui_cut = total_cut * voter_details.stake() / total_stake_sum;
+        let sui_cut = total_cut * voter_details.stake() / total_stake_sum;
 
         stake.reward_amount = stake.reward_amount + sui_cut;
+
+        event::emit(BalanceRewardEvent {
+            nivster: cap.voter(),
+            amount_nvr: 0,
+            amount_sui: sui_cut,
+            dispute_id,
+        });
     };
 
     // Unlock the users nvr stake.
@@ -1168,11 +1186,10 @@ public fun collect_rewards_one_sided(
         self.worker_pool.add_stake(stake.worker_pool_pos, case_locked_amount);
     };
 
-    event::emit(RewardEvent {
+    event::emit(BalanceUnlockedEvent {
         nivster: cap.voter(),
-        reward_nvr: 0,
-        reward_sui: sui_cut,
-        stake_unlocked: case_locked_amount,
+        amount_nvr: case_locked_amount,
+        dispute_id,
     });
 }
 
@@ -1182,21 +1199,19 @@ public fun collect_rewards_one_sided(
 /// - Dispute is not completed
 /// - Voter cap is invalid
 /// - Juror already claimed
-/// 
-/// Emits:
-/// - `RewardEvent` recording the rewards
-/// - `PenaltyEvent` recording the penalties
 public fun collect_rewards_completed(
     court: &mut Court,
     dispute: &mut Dispute,
     cap: &VoterCap,
 ) {
+    let dispute_id = object::id(dispute);
+
     assert!(
         dispute.status() == dispute_status_completed(), 
         EDisputeNotCompleted
     );
     assert!(
-        cap.dispute_id_voter() == object::id(dispute), 
+        cap.dispute_id_voter() == dispute_id, 
         EInvalidVoterCap
     );
 
@@ -1231,10 +1246,16 @@ public fun collect_rewards_completed(
         let voter_details = dispute.voters_mut().borrow_mut(cap.voter());
         voter_details.set_reward_collected();
 
-        event::emit(PenaltyEvent {
+        event::emit(BalanceUnlockedEvent {
             nivster: cap.voter(),
-            penalty,
-            stake_unlocked: staked_amount,
+            amount_nvr: staked_amount,
+            dispute_id,
+        });
+
+        event::emit(BalancePenaltyEvent {
+            nivster: cap.voter(),
+            amount_nvr: penalty,
+            dispute_id,
         });
 
         return
@@ -1271,10 +1292,16 @@ public fun collect_rewards_completed(
         let voter_details = dispute.voters_mut().borrow_mut(cap.voter());
         voter_details.set_reward_collected();
 
-        event::emit(PenaltyEvent {
+        event::emit(BalanceUnlockedEvent {
             nivster: cap.voter(),
-            penalty,
-            stake_unlocked: staked_amount,
+            amount_nvr: staked_amount,
+            dispute_id,
+        });
+
+        event::emit(BalancePenaltyEvent {
+            nivster: cap.voter(),
+            amount_nvr: penalty,
+            dispute_id,
         });
 
         return
@@ -1318,11 +1345,17 @@ public fun collect_rewards_completed(
         );
     };
 
-    event::emit(RewardEvent {
+    event::emit(BalanceUnlockedEvent {
         nivster: cap.voter(),
-        reward_nvr: nvr_reward,
-        reward_sui: sui_reward,
-        stake_unlocked: staked_amount,
+        amount_nvr: staked_amount,
+        dispute_id,
+    });
+
+    event::emit(BalanceRewardEvent {
+        nivster: cap.voter(),
+        amount_nvr: nvr_reward,
+        amount_sui: sui_reward,
+        dispute_id,
     });
 }
 
@@ -1622,6 +1655,12 @@ public(package) fun draw_nivsters(
         // Lock the minimum stake amount for a vote in the case.
         nivster_stake.amount = nivster_stake.amount - self.min_stake;
         nivster_stake.locked_amount = nivster_stake.locked_amount + self.min_stake; 
+
+        event::emit(BalanceLockedEvent {
+            nivster: n_addr,
+            amount_nvr: self.min_stake,
+            dispute_id,
+        });
 
         if (nivsters.contains(n_addr)) {
             // Nivster was already chosen in a previous draw, vote count is incremented by 1.
