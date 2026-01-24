@@ -282,6 +282,7 @@ public struct DisputeCreationEvent has copy, drop {
     dispute_id: ID,
     contract_id: ID,
     court_id: ID,
+    initiator: address,
     max_appeals: u8,
     description: String,
     parties: vector<address>,
@@ -297,6 +298,9 @@ public struct DisputeCreationEvent has copy, drop {
     treasury_share_nvr: u64,
     empty_vote_penalty: u64,
     dispute_fee: u64,
+    key_servers: vector<address>,
+    public_keys: vector<vector<u8>>,
+    threshold: u8,
 }
 
 public struct DisputeAppealEvent has copy, drop {
@@ -612,6 +616,7 @@ public fun open_dispute(
         dispute_id,
         contract_id: contract,
         court_id,
+        initiator: ctx.sender(),
         max_appeals,
         description,
         parties,
@@ -627,6 +632,9 @@ public fun open_dispute(
         treasury_share_nvr: self.treasury_share_nvr,
         empty_vote_penalty: self.empty_vote_penalty,
         dispute_fee: self.dispute_fee,
+        key_servers: self.key_servers,
+        public_keys: self.public_keys,
+        threshold: self.threshold,
     });
 
     self.reward_pool.join(fee.into_balance());
