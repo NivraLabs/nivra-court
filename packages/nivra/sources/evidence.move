@@ -53,9 +53,10 @@ public struct EvidenceModificationEvent has copy, drop {
     file_name: Option<String>,
     file_type: Option<String>,
     file_subtype: Option<String>,
+    encrypted: bool,
 }
 
-public struct EvidenceDestroyedEvent has copy, drop {
+public struct EvidenceDeletionEvent has copy, drop {
     evidence_id: ID,
 }
 
@@ -121,6 +122,7 @@ public fun modify_evidence(
     file_name: Option<String>,
     file_type: Option<String>,
     file_subtype: Option<String>,
+    encrypted: bool,
     cap: &PartyCap, 
 ) {
     assert!(object::id(cap) == evidence.party_cap_id, EInvalidPartyCap);
@@ -130,6 +132,7 @@ public fun modify_evidence(
     evidence.file_name = file_name;
     evidence.file_type = file_type;
     evidence.file_subtype = file_subtype;
+    evidence.encrypted = encrypted;
 
     event::emit(EvidenceModificationEvent {
         evidence_id: object::id(evidence),
@@ -138,6 +141,7 @@ public fun modify_evidence(
         file_name,
         file_type,
         file_subtype,
+        encrypted,
     });
 }
 
@@ -167,7 +171,7 @@ public fun destroy_evidence(
 
     id.delete();
 
-    event::emit(EvidenceDestroyedEvent { 
+    event::emit(EvidenceDeletionEvent { 
         evidence_id,
     });
 }
