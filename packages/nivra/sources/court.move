@@ -1651,6 +1651,11 @@ public(package) fun draw_nivsters(
         let (n_addr, n_stake) = self.worker_pool.get_idx(wp_idx);
         // Remove the nivster n from the worker pool to prevent duplicate selections.
         remove_from_worker_pool(self, n_addr, wp_idx);
+
+        event::emit(WorkerPoolDepartEvent { 
+            nivster: n_addr,
+        });
+        
         // Load nivster's stake.
         let nivster_stake = self.stakes.borrow_mut(n_addr);
 
