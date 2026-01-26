@@ -301,13 +301,11 @@ public struct DisputeCreationEvent has copy, drop {
 public struct DisputeAppealEvent has copy, drop {
     dispute_id: ID,
     initiator: address,
-    fee: u64,
 }
 
 public struct DisputeAcceptEvent has copy, drop {
     dispute_id: ID,
     initiator: address,
-    fee: u64,
 }
 
 public struct DisputeInitialNivstersDrawnEvent has copy, drop {
@@ -770,7 +768,6 @@ entry fun open_appeal(
     event::emit(DisputeAppealEvent { 
         dispute_id, 
         initiator: cap.party(),
-        fee: fee.value(),
     });
 
     self.reward_pool.join(fee.into_balance());
@@ -827,7 +824,6 @@ public fun accept_dispute(
     event::emit(DisputeAcceptEvent {
         dispute_id: object::id(dispute),
         initiator: cap.party(),
-        fee: fee.value(),
     });
 
     self.reward_pool.join(fee.into_balance());
