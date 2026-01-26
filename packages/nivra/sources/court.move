@@ -394,7 +394,7 @@ public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
             locked_amount: 0,
             reward_amount: 0,
             in_worker_pool: false,
-            worker_pool_pos: 10_001,
+            worker_pool_pos: worker_pool::max_length(),
         });
 
         event::emit(BalanceInitialDepositEvent { 
@@ -1978,7 +1978,7 @@ fun remove_from_worker_pool(
     // Update the status and position of the removed staker.
     let removed_staker = self.stakes.borrow_mut(addr);
     removed_staker.in_worker_pool = false;
-    removed_staker.worker_pool_pos = 10_001;
+    removed_staker.worker_pool_pos = worker_pool::max_length();
 
     // Perform the swap remove.
     self.worker_pool.swap_remove(idx);
