@@ -72,7 +72,6 @@ const MAX_OPTION_LEN: u64 = 50;
 // === Errors ===
 const EWrongVersion: u64 = 1;
 const ENotResponsePeriod: u64 = 7;
-const EBalanceMismatchInternal: u64 = 18;
 const EDisputeNotCompleted: u64 = 26;
 const ENoWithdrawAmount: u64 = 28;
 const EAlreadyInWorkerPool: u64 = 29;
@@ -1590,6 +1589,20 @@ public fun change_treasury_share(
     self.treasury_share_nvr = treasury_share_nvr;
 }
 
+public fun change_min_stake(
+    self: &mut Court, 
+    cap: &NivraAdminCap, 
+    court_registry: &CourtRegistry,
+    min_stake: u64,
+) {
+    court_registry.validate_admin_privileges(cap);
+
+    assert!(min_stake > 0, EZeroMinStakeInternal);
+
+    let self = self.load_inner_mut();
+    self.min_stake = min_stake;
+}
+
 public fun change_key_servers(
     self: &mut Court, 
     cap: &NivraAdminCap, 
@@ -1678,19 +1691,19 @@ public(package) fun draw_nivsters(
         // Load nivster's stake.
         let nivster_stake = self.stakes.borrow_mut(n_addr);
 
-        // Fail safe, should never throw.
-        assert!(
-            n_stake == nivster_stake.amount && n_stake >= self.min_stake, 
-            EBalanceMismatchInternal
-        );
+        // Lock the available stake amount up to court's min stake.
+        let locked_amount = if (nivster_stake.amount < self.min_stake) {
+            nivster_stake.amount
+        } else {
+            self.min_stake 
+        };
 
-        // Lock the minimum stake amount for a vote in the case.
-        nivster_stake.amount = nivster_stake.amount - self.min_stake;
-        nivster_stake.locked_amount = nivster_stake.locked_amount + self.min_stake; 
+        nivster_stake.amount = nivster_stake.amount - locked_amount;
+        nivster_stake.locked_amount = nivster_stake.locked_amount + locked_amount; 
 
         event::emit(BalanceLockedEvent {
             nivster: n_addr,
-            amount_nvr: self.min_stake,
+            amount_nvr: locked_amount,
             dispute_id,
         });
 
@@ -1698,7 +1711,7 @@ public(package) fun draw_nivsters(
             // Nivster was already chosen in a previous draw, vote count is incremented by 1.
             let nivster_details = nivsters.borrow_mut(n_addr);
             nivster_details.increment_votes();
-            nivster_details.increase_stake(self.min_stake);
+            nivster_details.increase_stake(locked_amount);
 
             event::emit(NivsterReselectionEvent { 
                 dispute_id, 
@@ -1706,7 +1719,7 @@ public(package) fun draw_nivsters(
             });
         } else {
             nivsters.push_back(n_addr, create_voter_details(
-                self.min_stake
+                locked_amount
             ));
 
             event::emit(NivsterSelectionEvent { 
