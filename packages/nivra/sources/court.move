@@ -361,13 +361,18 @@ public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
     let deposit_amount = assets.value();
 
     assert!(self.status == Status::Running, ENotOperational);
-    assert!(deposit_amount >= self.min_stake, EDepositUnderMinStake);
 
     self.stake_pool.join(assets.into_balance());
     let sender = ctx.sender();
 
     if (self.stakes.contains(sender)) {
         let stake = self.stakes.borrow_mut(sender);
+
+        assert!(
+            stake.amount + deposit_amount >= self.min_stake, 
+            EDepositUnderMinStake
+        );
+
         stake.amount = stake.amount + deposit_amount;
 
         // If the user is enrolled in the worker pool, automatically
@@ -384,6 +389,8 @@ public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
             amount_nvr: deposit_amount,
         });
     } else {
+        assert!(deposit_amount >= self.min_stake, EDepositUnderMinStake);
+
         self.stakes.push_back(sender, Stake {
             amount: deposit_amount,
             locked_amount: 0,
