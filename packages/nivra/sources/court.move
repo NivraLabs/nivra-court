@@ -269,12 +269,9 @@ public struct BalancePenaltyEvent has copy, drop {
     dispute_id: ID,
 }
 
-public struct WorkerPoolEntryEvent has copy, drop {
+public struct WorkerPoolEvent has copy, drop {
     nivster: address,
-}
-
-public struct WorkerPoolDepartEvent has copy, drop {
-    nivster: address,
+    entry: bool,
 }
 
 public struct DisputeCreationEvent has copy, drop {
@@ -489,8 +486,9 @@ public fun join_worker_pool(self: &mut Court, ctx: &mut TxContext) {
         self.worker_pool.push_back(sender, stake.amount)
     );
 
-    event::emit(WorkerPoolEntryEvent {
+    event::emit(WorkerPoolEvent {
         nivster: sender,
+        entry: true,
     });
 }
 
@@ -518,8 +516,9 @@ public fun leave_worker_pool(self: &mut Court, ctx: &mut TxContext) {
         stake.worker_pool_pos.extract()
     );
 
-    event::emit(WorkerPoolDepartEvent {
+    event::emit(WorkerPoolEvent {
         nivster: sender,
+        entry: false,
     });
 }
 
@@ -1671,8 +1670,9 @@ public(package) fun draw_nivsters(
         // Remove the nivster n from the worker pool to prevent duplicate selections.
         remove_from_worker_pool(self, n_addr, wp_idx);
 
-        event::emit(WorkerPoolDepartEvent { 
+        event::emit(WorkerPoolEvent { 
             nivster: n_addr,
+            entry: false,
         });
 
         // Load nivster's stake.
