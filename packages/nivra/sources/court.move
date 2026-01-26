@@ -184,8 +184,7 @@ public struct Stake has drop, store {
     amount: u64,
     locked_amount: u64,
     reward_amount: u64,
-    in_worker_pool: bool,
-    worker_pool_pos: u64,
+    worker_pool_pos: Option<u64>,
 }
 
 public struct DisputeDetails has drop, store {
@@ -377,9 +376,9 @@ public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
 
         // If the user is enrolled in the worker pool, automatically
         // increase the worker pool stake.
-        if (stake.in_worker_pool) {
+        if (stake.worker_pool_pos.is_some()) {
             self.worker_pool.add_stake(
-                stake.worker_pool_pos, 
+                stake.worker_pool_pos.extract(), 
                 deposit_amount
             );
         };
@@ -393,8 +392,7 @@ public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
             amount: deposit_amount,
             locked_amount: 0,
             reward_amount: 0,
-            in_worker_pool: false,
-            worker_pool_pos: worker_pool::max_length(),
+            worker_pool_pos: option::none(),
         });
 
         event::emit(BalanceInitialDepositEvent { 
@@ -439,11 +437,16 @@ public fun withdraw(
 
     // Automatically update worker pool stake or remove the caller
     // if the remaining stake falls below the minimum threshold.
-    if (stake.in_worker_pool && amount_nvr > 0) {
+    if (stake.worker_pool_pos.is_some() && amount_nvr > 0) {
         if (stake.amount < self.min_stake) {
-            remove_from_worker_pool(self, sender, stake.worker_pool_pos);
+            remove_from_worker_pool(
+                self, 
+                sender, 
+                stake.worker_pool_pos.extract()
+            );
         } else {
-            self.worker_pool.sub_stake(stake.worker_pool_pos, amount_nvr);
+            self.worker_pool
+            .sub_stake(stake.worker_pool_pos.extract(), amount_nvr);
         };
     };
 
@@ -480,11 +483,11 @@ public fun join_worker_pool(self: &mut Court, ctx: &mut TxContext) {
 
     assert!(self.status == Status::Running, ENotOperational);
     assert!(stake.amount >= self.min_stake, ENotEnoughNVR);
-    assert!(!stake.in_worker_pool, EAlreadyInWorkerPool);
-
-    self.worker_pool.push_back(sender, stake.amount);
-    stake.in_worker_pool = true;
-    stake.worker_pool_pos = self.worker_pool.length() - 1;
+    assert!(!stake.worker_pool_pos.is_some(), EAlreadyInWorkerPool);
+    
+    stake.worker_pool_pos = option::some(
+        self.worker_pool.push_back(sender, stake.amount)
+    );
 
     event::emit(WorkerPoolEntryEvent {
         nivster: sender,
@@ -507,9 +510,13 @@ public fun leave_worker_pool(self: &mut Court, ctx: &mut TxContext) {
 
     let stake = self.stakes.borrow_mut(sender);
 
-    assert!(stake.in_worker_pool, ENotInWorkerPool);
+    assert!(stake.worker_pool_pos.is_some(), ENotInWorkerPool);
 
-    remove_from_worker_pool(self, sender, stake.worker_pool_pos);
+    remove_from_worker_pool(
+        self, 
+        sender, 
+        stake.worker_pool_pos.extract()
+    );
 
     event::emit(WorkerPoolDepartEvent {
         nivster: sender,
@@ -1126,9 +1133,9 @@ public fun collect_rewards_cancelled(
     stake.amount = stake.amount + case_locked_amount;
     voter_details.set_reward_collected();
 
-    if (stake.in_worker_pool) {
+    if (stake.worker_pool_pos.is_some()) {
         self.worker_pool.add_stake(
-            stake.worker_pool_pos, 
+            stake.worker_pool_pos.extract(), 
             case_locked_amount
         );
     };
@@ -1201,8 +1208,9 @@ public fun collect_rewards_one_sided(
     let voter_details = dispute.voters_mut().borrow_mut(cap.voter());
     voter_details.set_reward_collected();
 
-    if (stake.in_worker_pool) {
-        self.worker_pool.add_stake(stake.worker_pool_pos, case_locked_amount);
+    if (stake.worker_pool_pos.is_some()) {
+        self.worker_pool.
+        add_stake(stake.worker_pool_pos.extract(), case_locked_amount);
     };
 
     event::emit(BalanceUnlockedEvent {
@@ -1254,9 +1262,9 @@ public fun collect_rewards_completed(
         stake.amount = stake.amount + staked_amount - penalty;
 
         // Update the worker pool amount.
-        if (stake.in_worker_pool) {
+        if (stake.worker_pool_pos.is_some()) {
             self.worker_pool.add_stake(
-                stake.worker_pool_pos, 
+                stake.worker_pool_pos.extract(), 
                 staked_amount - penalty
             );
         };
@@ -1301,9 +1309,9 @@ public fun collect_rewards_completed(
         stake.amount = stake.amount + staked_amount - penalty;
 
         // Update the worker pool amount.
-        if (stake.in_worker_pool) {
+        if (stake.worker_pool_pos.is_some()) {
             self.worker_pool.add_stake(
-                stake.worker_pool_pos, 
+                stake.worker_pool_pos.extract(), 
                 staked_amount - penalty
             );
         };
@@ -1357,9 +1365,9 @@ public fun collect_rewards_completed(
     let voter_details = dispute.voters_mut().borrow_mut(cap.voter());
     voter_details.set_reward_collected();
 
-    if (stake.in_worker_pool) {
+    if (stake.worker_pool_pos.is_some()) {
         self.worker_pool.add_stake(
-            stake.worker_pool_pos, 
+            stake.worker_pool_pos.extract(), 
             staked_amount + nvr_reward
         );
     };
@@ -1972,13 +1980,12 @@ fun remove_from_worker_pool(
     if (last_pos_idx != idx) {
         let (last_pos_addr, _) = self.worker_pool.get_idx(last_pos_idx);
         let last_staker = self.stakes.borrow_mut(last_pos_addr);
-        last_staker.worker_pool_pos = idx;
+        last_staker.worker_pool_pos = option::some(idx);
     };
 
     // Update the status and position of the removed staker.
     let removed_staker = self.stakes.borrow_mut(addr);
-    removed_staker.in_worker_pool = false;
-    removed_staker.worker_pool_pos = worker_pool::max_length();
+    removed_staker.worker_pool_pos = option::none();
 
     // Perform the swap remove.
     self.worker_pool.swap_remove(idx);

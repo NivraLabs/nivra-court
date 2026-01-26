@@ -84,13 +84,19 @@ public(package) fun get_idx(self: &WorkerPool, idx: u64): (address, u64) {
     (addr, stake)
 }
 
-public(package) fun push_back(self: &mut WorkerPool, addr: address, stake: u64) {
+public(package) fun push_back(
+    self: &mut WorkerPool, 
+    addr: address, 
+    stake: u64
+): u64 {
     let idx = self.length;
 
     assert!(idx < MAX_LENGTH, EWorkerPoolFull);
     self.change_stake_idx(idx, addr, stake);
     self.add_bit_idx(idx, stake);
     self.length = self.length + 1;
+
+    idx
 }
 
 public(package) fun swap_remove(self: &mut WorkerPool, idx: u64) {
