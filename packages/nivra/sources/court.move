@@ -71,6 +71,7 @@ const MAX_OPTION_LEN: u64 = 50;
 
 // === Errors ===
 const EWrongVersion: u64 = 1;
+const EZeroDeposit: u64 = 2;
 const ENotResponsePeriod: u64 = 7;
 const EDisputeNotCompleted: u64 = 26;
 const ENoWithdrawAmount: u64 = 28;
@@ -230,11 +231,7 @@ public struct CourtInner has store {
 public struct BalanceDepositEvent has copy, drop {
     nivster: address,
     amount_nvr: u64,
-}
-
-public struct BalanceInitialDepositEvent has copy, drop {
-    nivster: address,
-    amount_nvr: u64,
+    initial_deposit: bool,
 }
 
 public struct BalanceWithdrawalEvent has copy, drop {
@@ -345,27 +342,18 @@ public struct NivsterReselectionEvent has copy, drop {
 
 // === Public Functions ===
 /// Adds stake to the court.
-/// 
-/// The deposited NVR is added to the court’s stake pool and credited to the
-/// caller’s available stake. If the caller is already enrolled in the worker
-/// pool, their worker pool stake weight is automatically increased to reflect
-/// the additional deposit.
-/// 
-/// Aborts if:
-/// - The court is not in the `Running` state
-/// - The deposited stake amount is less than the minimum required stake
 public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
     let self = self.load_inner_mut();
     let deposit_amount = assets.value();
+    let sender = ctx.sender();
 
     assert!(self.status == Status::Running, ENotOperational);
-
-    self.stake_pool.join(assets.into_balance());
-    let sender = ctx.sender();
+    assert!(deposit_amount > 0, EZeroDeposit);
 
     if (self.stakes.contains(sender)) {
         let stake = self.stakes.borrow_mut(sender);
 
+        // Allow top-ups as long as the resulting stake meets the min stake.
         assert!(
             stake.amount + deposit_amount >= self.min_stake, 
             EDepositUnderMinStake
@@ -373,11 +361,10 @@ public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
 
         stake.amount = stake.amount + deposit_amount;
 
-        // If the user is enrolled in the worker pool, automatically
-        // increase the worker pool stake.
+        // Automatically increase the worker pool stake.
         if (stake.worker_pool_pos.is_some()) {
             self.worker_pool.add_stake(
-                stake.worker_pool_pos.extract(), 
+                *stake.worker_pool_pos.borrow(), 
                 deposit_amount
             );
         };
@@ -385,6 +372,7 @@ public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
         event::emit(BalanceDepositEvent { 
             nivster: sender, 
             amount_nvr: deposit_amount,
+            initial_deposit: false,
         });
     } else {
         assert!(deposit_amount >= self.min_stake, EDepositUnderMinStake);
@@ -396,11 +384,14 @@ public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
             worker_pool_pos: option::none(),
         });
 
-        event::emit(BalanceInitialDepositEvent { 
+        event::emit(BalanceDepositEvent { 
             nivster: sender, 
             amount_nvr: deposit_amount, 
+            initial_deposit: true,
         });
     };
+
+    self.stake_pool.join(assets.into_balance());
 }
 
 
@@ -443,11 +434,11 @@ public fun withdraw(
             remove_from_worker_pool(
                 self, 
                 sender, 
-                stake.worker_pool_pos.extract()
+                *stake.worker_pool_pos.borrow()
             );
         } else {
             self.worker_pool
-            .sub_stake(stake.worker_pool_pos.extract(), amount_nvr);
+            .sub_stake(*stake.worker_pool_pos.borrow(), amount_nvr);
         };
     };
 
@@ -517,7 +508,7 @@ public fun leave_worker_pool(self: &mut Court, ctx: &mut TxContext) {
     remove_from_worker_pool(
         self, 
         sender, 
-        stake.worker_pool_pos.extract()
+        *stake.worker_pool_pos.borrow()
     );
 
     event::emit(WorkerPoolEvent {
@@ -1136,7 +1127,7 @@ public fun collect_rewards_cancelled(
 
     if (stake.worker_pool_pos.is_some()) {
         self.worker_pool.add_stake(
-            stake.worker_pool_pos.extract(), 
+            *stake.worker_pool_pos.borrow(), 
             case_locked_amount
         );
     };
@@ -1211,7 +1202,7 @@ public fun collect_rewards_one_sided(
 
     if (stake.worker_pool_pos.is_some()) {
         self.worker_pool.
-        add_stake(stake.worker_pool_pos.extract(), case_locked_amount);
+        add_stake(*stake.worker_pool_pos.borrow(), case_locked_amount);
     };
 
     event::emit(BalanceUnlockedEvent {
@@ -1265,7 +1256,7 @@ public fun collect_rewards_completed(
         // Update the worker pool amount.
         if (stake.worker_pool_pos.is_some()) {
             self.worker_pool.add_stake(
-                stake.worker_pool_pos.extract(), 
+                *stake.worker_pool_pos.borrow(), 
                 staked_amount - penalty
             );
         };
@@ -1312,7 +1303,7 @@ public fun collect_rewards_completed(
         // Update the worker pool amount.
         if (stake.worker_pool_pos.is_some()) {
             self.worker_pool.add_stake(
-                stake.worker_pool_pos.extract(), 
+                *stake.worker_pool_pos.borrow(), 
                 staked_amount - penalty
             );
         };
@@ -1368,7 +1359,7 @@ public fun collect_rewards_completed(
 
     if (stake.worker_pool_pos.is_some()) {
         self.worker_pool.add_stake(
-            stake.worker_pool_pos.extract(), 
+            *stake.worker_pool_pos.borrow(), 
             staked_amount + nvr_reward
         );
     };
