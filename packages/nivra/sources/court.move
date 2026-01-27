@@ -498,6 +498,19 @@ public fun open_dispute(
     assert!(parties.contains(&ctx.sender()), EInitiatorNotParty);
     assert!(max_appeals <= MAX_APPEALS, EInvalidAppealCount);
     assert!(description.length() <= MAX_DESCRIPTION_LEN, EDescriptionTooLong);
+    assert!(
+        options.length() == 0 || 
+        (options.length() >= MIN_OPTIONS && options.length() <= MAX_OPTIONS), 
+        EInvalidOptionsAmount
+    );
+
+    let mut i = 0;
+
+    while (i < options.length()) {
+        assert!(options[i].length() > 0, EOptionEmpty);
+        assert!(options[i].length() <= MAX_OPTION_LEN, EOptionTooLong);
+        i = i + 1;
+    };
 
     let serialized_config = serialize_dispute_config(
         contract, 
@@ -1772,17 +1785,12 @@ public(package) fun serialize_dispute_config(
     let mut parties = parties;
     let mut options = options;
 
-    assert!(
-        options.length() == 0 || 
-        (options.length() >= MIN_OPTIONS && options.length() <= MAX_OPTIONS), 
-        EInvalidOptionsAmount
-    );
-
     parties.insertion_sort_by!(|a, b| (*a).to_u256() < (*b).to_u256());
     options.insertion_sort_by!(|a, b| {
         bytes_lt(a.as_bytes(), b.as_bytes())
     });
 
+    // Check for duplicates after sorting to save gas.
     let mut i = 1;
 
     while (i < options.length()) {
@@ -1790,14 +1798,11 @@ public(package) fun serialize_dispute_config(
         i = i + 1;
     };
 
-    if (options.length() >= 1) {
-        assert!(options[0].length() > 0, EOptionEmpty);
-        assert!(options[i - 1].length() <= MAX_OPTION_LEN, EOptionTooLong);
-    };
-
     serialized.append(object::id_to_bytes(&contract_id));
     parties.do!(|addr| serialized.append(addr.to_bytes()));
+    // NOTE: max options.length() = 5.
     serialized.push_back(options.length() as u8);
+    // NOTE: max option.length() = 255.
     options.do!(|option| {
         serialized.push_back(option.length() as u8);
         serialized.append(option.into_bytes());
