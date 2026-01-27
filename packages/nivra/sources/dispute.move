@@ -475,6 +475,46 @@ public fun result(dispute: &Dispute): vector<u64> {
     dispute.result
 }
 
+public fun response_period_ms(dispute: &Dispute): u64 {
+    dispute.timetable.response_period_ms
+}
+
+public fun draw_period_ms(dispute: &Dispute): u64 {
+    dispute.timetable.draw_period_ms
+}
+
+public fun evidence_period_ms(dispute: &Dispute): u64 {
+    dispute.timetable.evidence_period_ms
+}
+
+public fun voting_period_ms(dispute: &Dispute): u64 {
+    dispute.timetable.voting_period_ms
+}
+
+public fun key_servers(dispute: &Dispute): vector<address> {
+    dispute.key_servers
+}
+
+public fun public_keys(dispute: &Dispute): vector<vector<u8>> {
+    dispute.public_keys
+}
+
+public fun threshold(dispute: &Dispute): u8 {
+    dispute.threshold
+}
+
+public fun appeal_period_ms(dispute: &Dispute): u64 {
+    dispute.timetable.appeal_period_ms
+}
+
+public fun description(dispute: &Dispute): String {
+    dispute.description
+}
+
+public fun court(dispute: &Dispute): ID {
+    dispute.court
+}
+
 public fun contract(dispute: &Dispute): ID {
     dispute.contract
 }
@@ -686,8 +726,8 @@ public(package) fun create_dispute(
     empty_vote_penalty: u64,
     clock: &Clock,
     ctx: &mut TxContext,
-): ID {
-    let dispute = Dispute {
+): Dispute {
+    Dispute {
         id: object::new(ctx),
         status: dispute_status_response(),
         initiator,
@@ -727,14 +767,15 @@ public(package) fun create_dispute(
             treasury_share_nvr,
             empty_vote_penalty,
         },
-    };
+    }
+}
 
-    let dispute_id = object::id(&dispute);
-
-    distribute_party_caps(dispute.parties, dispute_id, ctx);
-    transfer::share_object(dispute);
-
-    dispute_id
+public(package) fun share_dispute(
+    self: Dispute,
+    ctx: &mut TxContext,
+) {
+    distribute_party_caps(self.parties, object::id(&self), ctx);
+    transfer::share_object(self);
 }
 
 public(package) fun distribute_voter_caps(

@@ -127,10 +127,6 @@ const ENotEnoughNivsters: vector<u8> =
 b"The court does not have enough Nivsters to process this dispute action.";
 
 #[error]
-const EDisputeAlreadyExists: vector<u8> =
-b"A dispute has already been opened for this contract ID.";
-
-#[error]
 const EInitiatorNotParty: vector<u8> =
 b"The caller must be a party to the dispute.";
 
@@ -396,18 +392,6 @@ public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
 
 
 /// Withdraws available NVR stake and/or accumulated SUI rewards from the court.
-/// 
-/// The caller may withdraw either or both assets in a single transaction.
-/// Withdrawn NVR is deducted from the caller’s available (unlocked) stake,
-/// while withdrawn SUI is deducted from accumulated rewards.
-/// 
-/// If the caller is enrolled in the worker pool, the worker pool stake is
-/// automatically updated. If the remaining NVR stake falls below the court’s
-/// minimum stake requirement, the caller is removed from the worker pool.
-/// 
-/// Aborts if:
-/// - The caller does not have sufficient NVR stake or SUI rewards
-/// - Both withdrawal amounts are zero
 public fun withdraw(
     self: &mut Court, 
     amount_nvr: u64,
@@ -418,27 +402,21 @@ public fun withdraw(
     let sender = ctx.sender();
     let stake = self.stakes.borrow_mut(sender);
 
-    // Check balances.
     assert!(stake.amount >= amount_nvr, ENotEnoughNVR);
     assert!(stake.reward_amount >= amount_sui, ENotEnoughSUI);
     assert!(amount_nvr > 0 || amount_sui > 0, ENoWithdrawAmount);
 
-    // Deduct amounts.
     stake.amount = stake.amount - amount_nvr;
     stake.reward_amount = stake.reward_amount - amount_sui;
 
-    // Automatically update worker pool stake or remove the caller
-    // if the remaining stake falls below the minimum threshold.
+    // Automatically remove or deduct from the worker pool.
     if (stake.worker_pool_pos.is_some() && amount_nvr > 0) {
+        let pos = *stake.worker_pool_pos.borrow();
+
         if (stake.amount < self.min_stake) {
-            remove_from_worker_pool(
-                self, 
-                sender, 
-                *stake.worker_pool_pos.borrow()
-            );
+            remove_from_worker_pool(self, sender, pos);
         } else {
-            self.worker_pool
-            .sub_stake(*stake.worker_pool_pos.borrow(), amount_nvr);
+            self.worker_pool.sub_stake(pos, amount_nvr);
         };
     };
 
@@ -454,17 +432,7 @@ public fun withdraw(
     (nvr, sui)
 }
 
-/// Enrolls the caller in the court’s worker pool.
-/// 
-/// Aborts if:
-/// - The court is not in the `Running` state
-/// - The user does not have a stake in the court.
-/// - The caller does not have the minimum required stake
-/// - The caller is already enrolled in the worker pool
-/// - The worker pool has reached its maximum capacity
-/// 
-/// Emits:
-/// - `WorkerPoolEntryEvent` recording the caller's entry to the worker pool
+/// Enrolls the caller into the worker pool.
 public fun join_worker_pool(self: &mut Court, ctx: &mut TxContext) {
     let self = self.load_inner_mut();
     let sender = ctx.sender();
@@ -487,20 +455,10 @@ public fun join_worker_pool(self: &mut Court, ctx: &mut TxContext) {
     });
 }
 
-/// Removes the caller from the worker pool while retaining their stake.
-/// 
-/// Aborts if:
-/// - The caller is not currently enrolled in the worker pool
-/// - The user does not have a stake in the court.
-/// 
-/// Emits:
-/// - `WorkerPoolDepartEvent` recording the caller's exit from the worker pool
+/// Removes the caller from the worker pool.
 public fun leave_worker_pool(self: &mut Court, ctx: &mut TxContext) {
     let self = self.load_inner_mut();
     let sender = ctx.sender();
-
-    assert!(self.stakes.contains(sender), ENoStake);
-
     let stake = self.stakes.borrow_mut(sender);
 
     assert!(stake.worker_pool_pos.is_some(), ENotInWorkerPool);
@@ -517,7 +475,7 @@ public fun leave_worker_pool(self: &mut Court, ctx: &mut TxContext) {
     });
 }
 
-/// Opens a new dispute in the specified court for a given contract.
+/// Opens a new dispute for a given contract.
 public fun open_dispute(
     court: &mut Court,
     fee: Coin<SUI>,
@@ -534,7 +492,6 @@ public fun open_dispute(
 
     assert!(self.status == Status::Running, ENotOperational);
     assert!(fee.value() == self.dispute_fee, EInvalidFee);
-    // Enforce the dispute limitations.
     assert!(
         options.length() == 0 || 
         (options.length() >= MIN_OPTIONS && options.length() <= MAX_OPTIONS), 
@@ -546,7 +503,7 @@ public fun open_dispute(
     assert!(max_appeals <= MAX_APPEALS, EInvalidAppealCount);
     assert!(description.length() <= MAX_DESCRIPTION_LEN, EDescriptionTooLong);
 
-    // Check if all the options are unique and less than the max length.
+    // Check that all the options are unique and less than the max length.
     let mut i = 0;
 
     while(i < options.length()) {
@@ -570,12 +527,7 @@ public fun open_dispute(
         max_appeals
     );
 
-    assert!(
-        !dispute_exists_for_contract(self, contract, &serialized_config), 
-        EDisputeAlreadyExists
-    );
-
-    let dispute_id = create_dispute(
+    let dispute = create_dispute(
         ctx.sender(),
         contract,
         court_id,
@@ -603,9 +555,8 @@ public fun open_dispute(
         ctx
     );
 
-    // Create dispute details and add deposit for the initial dispute fee.
     let mut dispute_details = DisputeDetails {
-        dispute_id,
+        dispute_id: object::id(&dispute),
         depositors: vec_map::empty(),
     };
 
@@ -615,36 +566,15 @@ public fun open_dispute(
         self.cases.add(contract, vec_map::empty());
     };
 
+    // Insert dispute details for this config (aborts if config already exists).
     self.cases
     .borrow_mut(contract)
     .insert(serialized_config, dispute_details);
 
-    event::emit(DisputeCreationEvent {
-        dispute_id,
-        contract_id: contract,
-        court_id,
-        initiator: ctx.sender(),
-        max_appeals,
-        description,
-        parties,
-        options,
-        response_period_ms: self.timetable.default_response_period_ms,
-        draw_period_ms: self.timetable.default_draw_period_ms,
-        evidence_period_ms: self.timetable.default_evidence_period_ms,
-        voting_period_ms: self.timetable.default_voting_period_ms,
-        appeal_period_ms: self.timetable.default_appeal_period_ms,
-        sanction_model: self.sanction_model,
-        coefficient: self.coefficient,
-        treasury_share: self.treasury_share,
-        treasury_share_nvr: self.treasury_share_nvr,
-        empty_vote_penalty: self.empty_vote_penalty,
-        dispute_fee: self.dispute_fee,
-        key_servers: self.key_servers,
-        public_keys: self.public_keys,
-        threshold: self.threshold,
-    });
+    emit_dispute_creation(&dispute);
 
     self.reward_pool.join(fee.into_balance());
+    dispute.share_dispute(ctx);
 }
 
 /// Draws initial nivsters after both parties have accepted the case
@@ -1863,57 +1793,23 @@ public(package) fun serialize_dispute_config(
     let mut parties = parties;
     let mut options = options;
 
-    let mut val_per_word: VecMap<String, u64> = vec_map::empty();
-
-    options.do_ref!(|word| {
-        let mut sum = 0;
-
-        word.as_bytes().do_ref!(|char_val| sum = sum + (*char_val as u64));
-        val_per_word.insert(*word, sum);
-    });
-
-    // Sort addresses and options, so the order doesn't matter
     parties.insertion_sort_by!(|a, b| (*a).to_u256() < (*b).to_u256());
     options.insertion_sort_by!(|a, b| {
-        let a_val = val_per_word.get(a);
-        let b_val = val_per_word.get(b);
-
-        // In rare cases, if the words have the same value, then compare by
-        // byte positions.
-        if (*a_val == *b_val) {
-            let mut bytes: &vector<u8>;
-            let mut compare: &vector<u8>;
-
-            if (a.length() > b.length()) {
-                bytes = b.as_bytes();
-                compare = a.as_bytes();
-            } else {
-                bytes = a.as_bytes();
-                compare = b.as_bytes();
-            };
-
-            let mut i = 0;
-
-            while (i < bytes.length() - 1) {
-                if (bytes[i] != compare[i]) {
-                    return bytes[i] < compare[i]
-                };
-
-                i = i + 1;
-            };
-
-            bytes[bytes.length() - 1] < compare[bytes.length() - 1]
-        } else {
-            *a_val < *b_val
-        }
+        bytes_lt(a.as_bytes(), b.as_bytes())
     });
 
     serialized.append(object::id_to_bytes(&contract_id));
     parties.do!(|addr| serialized.append(addr.to_bytes()));
-    options.do!(|option| serialized.append(option.into_bytes()));
+    // NOTE: max options length is capped to 5.
+    serialized.push_back(options.length() as u8);
+    // NOTE: max option length is capped to 50.
+    options.do!(|option| {
+        serialized.push_back(option.length() as u8);
+        serialized.append(option.into_bytes());
+    });
     serialized.push_back(max_appeals);
 
-    serialized
+    sui::hash::blake2b256(&serialized)
 }
 
 public(package) fun minority_penalties_and_majority_stakes(
@@ -1961,21 +1857,6 @@ public(package) fun minority_penalties_and_majority_stakes(
 }
 
 // === Private Functions ===
-
-fun dispute_exists_for_contract(
-    self: &CourtInner,
-    contract_id: ID,
-    serialized_config: &vector<u8>,
-): bool {
-    if (!self.cases.contains(contract_id)) {
-        false
-    } else {
-        let case = self.cases.borrow(contract_id);
-
-        case.contains(serialized_config)
-    }
-}
-
 fun remove_from_worker_pool(
     self: &mut CourtInner,
     addr: address,
@@ -1996,4 +1877,48 @@ fun remove_from_worker_pool(
 
     // Perform the swap remove.
     self.worker_pool.swap_remove(idx);
+}
+
+fun emit_dispute_creation(dispute: &Dispute) {
+    event::emit(DisputeCreationEvent {
+        dispute_id: object::id(dispute),
+        contract_id: dispute.contract(),
+        court_id: dispute.court(),
+        initiator: dispute.inititator(),
+        max_appeals: dispute.max_appeals(),
+        description: dispute.description(),
+        parties: dispute.parties(),
+        options: dispute.options(),
+        response_period_ms: dispute.response_period_ms(),
+        draw_period_ms: dispute.draw_period_ms(),
+        evidence_period_ms: dispute.evidence_period_ms(),
+        voting_period_ms: dispute.voting_period_ms(),
+        appeal_period_ms: dispute.appeal_period_ms(),
+        sanction_model: dispute.sanction_model(),
+        coefficient: dispute.coefficient(),
+        treasury_share: dispute.treasury_share(),
+        treasury_share_nvr: dispute.treasury_share_nvr(),
+        empty_vote_penalty: dispute.empty_vote_penalty(),
+        dispute_fee: dispute.dispute_fee(),
+        key_servers: dispute.key_servers(),
+        public_keys: dispute.public_keys(),
+        threshold: dispute.threshold(),
+    });
+}
+
+fun bytes_lt(a: &vector<u8>, b: &vector<u8>): bool {
+    let min = if (a.length() < b.length()) { a.length() } else { b.length() };
+    let mut i = 0;
+
+    while (i < min) {
+        if (a[i] < b[i]) {
+            return true
+        };
+        if (a[i] > b[i]) {
+            return false
+        };
+        i = i + 1;
+    };
+
+    a.length() < b.length()
 }
