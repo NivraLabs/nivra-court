@@ -67,7 +67,7 @@ const MAX_OPTIONS: u64 = 5;
 const PARTY_COUNT: u64 = 2;
 const MAX_APPEALS: u8 = 3;
 const MAX_DESCRIPTION_LEN: u64 = 2000;
-const MAX_OPTION_LEN: u64 = 50;
+const MAX_OPTION_LEN: u64 = 255;
 
 // === Errors ===
 const EWrongVersion: u64 = 1;
@@ -1802,7 +1802,7 @@ public(package) fun serialize_dispute_config(
     parties.do!(|addr| serialized.append(addr.to_bytes()));
     // NOTE: max options length is capped to 5.
     serialized.push_back(options.length() as u8);
-    // NOTE: max option length is capped to 50.
+    // NOTE: max option length is capped to 255.
     options.do!(|option| {
         serialized.push_back(option.length() as u8);
         serialized.append(option.into_bytes());
