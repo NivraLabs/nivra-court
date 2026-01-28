@@ -88,6 +88,7 @@ const EInvalidKeyConfigInternal: u64 = 42;
 const ENotDrawPeriod: u64 = 43;
 const EOptionEmpty: u64 = 44;
 const EDisputeAlreadyExists: u64 = 45;
+const ETooManyNivsters: u64 = 46;
 
 #[error]
 const EOptionTooLong: vector<u8> =
@@ -735,16 +736,6 @@ entry fun handle_dispute_tie(
 }
 
 /// Cancels a failed or abandoned dispute.
-/// 
-/// Anyone may cancel the dispute if it fails to progress to completion
-/// (e.g. votes are not counted or a tie is not resolved within the allowed time
-///  window).
-/// 
-/// Aborts if:
-/// - The dispute is not in a cancellable (incomplete) state
-/// 
-/// Emits:
-/// - `DisputeCancelEvent` recording the dispute cancellation
 public fun cancel_dispute(
     dispute: &mut Dispute,
     court: &mut Court,
@@ -775,27 +766,16 @@ public fun cancel_dispute(
         i = i + 1;
     };
 
-    dispute.set_status(dispute_status_cancelled());
-
     event::emit(DisputeCancelEvent { 
         dispute_id: object::id(dispute),
         initiator: ctx.sender(),
     });
+
+    dispute.set_status(dispute_status_cancelled());
 }
 
 /// Resolves a one-sided dispute where one party failed to pay the required
 /// dispute or appeal fee within the allowed time window.
-/// 
-/// A one-sided resolution occurs when only a single party has successfully
-/// funded the dispute or an appeal round. In this case, the funded party
-/// automatically wins without juror voting.
-/// 
-/// Aborts if:
-/// - The dispute is not eligible for one-sided resolution
-/// 
-/// Emits:
-/// - `DisputeOneSidedCompletionEvent` recording the dispute one-sided 
-///    completion
 public fun resolve_one_sided_dispute(
     court: &mut Court,
     dispute: &mut Dispute,
@@ -876,15 +856,6 @@ public fun resolve_one_sided_dispute(
 
 /// Finalizes a fully adjudicated dispute after voting and tallying have 
 /// completed.
-/// 
-/// This function may be called once the dispute has reached a terminal state
-/// and a winning option has been determined by juror voting.
-/// 
-/// Aborts if:
-/// - The dispute has not completed voting and tallying
-/// 
-/// Emits:
-/// - `DisputeCompleteEvent` recording the dispute completion
 public fun complete_dispute(
     court: &mut Court,
     dispute: &mut Dispute,
@@ -973,16 +944,6 @@ public fun complete_dispute(
 }
 
 /// Refunds a juror’s locked stake when a dispute is cancelled.
-/// 
-/// If a dispute is cancelled, participating jurors ("nivsters") may reclaim
-/// the stake that was locked for the case. The refunded amount is proportional
-/// to the juror’s voting weight and equals:
-///
-/// `locked_refund = votes × minimum_stake`
-/// 
-/// Aborts if:
-/// - The dispute is not in the `Cancelled` state
-/// - The juror has already collected their refund
 public fun collect_rewards_cancelled(
     court: &mut Court,
     dispute: &mut Dispute,
@@ -1020,15 +981,6 @@ public fun collect_rewards_cancelled(
 }
 
 /// Collects juror rewards for a one-sided dispute resolution.
-/// 
-/// A dispute is considered *one-sided* when one party fails to pay the
-/// required dispute or appeal fee. In this case, the paying party
-/// automatically prevails and any fees paid by the opposing party are
-/// redistributed to participating jurors ("nivsters").
-/// 
-/// Aborts if:
-/// - The dispute is not in the `CompletedOneSided` state
-/// - The juror has already collected rewards for this dispute
 public fun collect_rewards_one_sided(
     court: &mut Court,
     dispute: &mut Dispute,
@@ -1524,13 +1476,6 @@ public fun update_allowed_versions(
 /// Selection is stake-weighted: each enrolled worker’s probability of being
 /// selected is proportional to their staked amount relative to the total stake
 /// in the worker pool.
-/// 
-/// Limitations:
-/// - Unique dynamic field accesses ≈ 4 * nivster_count + 10.
-/// 
-/// Aborts if:
-/// - The worker pool does not contain enough eligible nivsters to satisfy
-///   `nivster_count`
 public(package) fun draw_nivsters(
     self: &mut CourtInner, 
     nivsters: &mut LinkedTable<address, VoterDetails>, 
@@ -1542,6 +1487,8 @@ public(package) fun draw_nivsters(
     // Check if there are enough nivsters for the draw.
     let potential_nivsters: u64 = self.worker_pool.length();
     assert!(potential_nivsters >= nivster_count, ENotEnoughNivsters);
+
+    assert!(nivsters.length() + nivster_count <= 100, ETooManyNivsters);
 
     let mut nivsters_selected = 0;
     let mut generator = new_generator(r, ctx);
