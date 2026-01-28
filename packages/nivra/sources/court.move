@@ -23,13 +23,10 @@ use nivra::{
         dispute_status_completed_one_sided,
         dispute_status_cancelled,
         dispute_status_completed,
-        dispute_status_active,
-        dispute_status_draw,
         current_version,
     },
     worker_pool::{WorkerPool, Self},
     dispute::{
-        distribute_voter_caps,
         create_voter_details,
         create_dispute,
         VoterDetails,
@@ -90,6 +87,7 @@ const EInvalidThresholdInternal: u64 = 41;
 const EInvalidKeyConfigInternal: u64 = 42;
 const ENotDrawPeriod: u64 = 43;
 const EOptionEmpty: u64 = 44;
+const EDisputeAlreadyExists: u64 = 45;
 
 #[error]
 const EOptionTooLong: vector<u8> =
@@ -302,7 +300,7 @@ public struct DisputeAcceptEvent has copy, drop {
     initiator: address,
 }
 
-public struct DisputeInitialNivstersDrawnEvent has copy, drop {
+public struct DisputeNivstersDrawnEvent has copy, drop {
     dispute_id: ID,
     initiator: address,
 }
@@ -498,19 +496,17 @@ public fun open_dispute(
     assert!(parties.contains(&ctx.sender()), EInitiatorNotParty);
     assert!(max_appeals <= MAX_APPEALS, EInvalidAppealCount);
     assert!(description.length() <= MAX_DESCRIPTION_LEN, EDescriptionTooLong);
+
+    // TODO: Allow party vote only
     assert!(
-        options.length() == 0 || 
         (options.length() >= MIN_OPTIONS && options.length() <= MAX_OPTIONS), 
         EInvalidOptionsAmount
     );
 
-    let mut i = 0;
-
-    while (i < options.length()) {
-        assert!(options[i].length() > 0, EOptionEmpty);
-        assert!(options[i].length() <= MAX_OPTION_LEN, EOptionTooLong);
-        i = i + 1;
-    };
+    options.do_ref!(|option| {
+        assert!(option.length() > 0, EOptionEmpty);
+        assert!(option.length() <= MAX_OPTION_LEN, EOptionTooLong);
+    });
 
     let serialized_config = serialize_dispute_config(
         contract, 
@@ -519,6 +515,12 @@ public fun open_dispute(
         max_appeals
     );
 
+    assert!(
+        !dispute_exists_for_contract(self, contract, &serialized_config), 
+        EDisputeAlreadyExists
+    );
+
+    // NOTE: The dispute is initialized to start at response period.
     let dispute = create_dispute(
         ctx.sender(),
         contract,
@@ -569,73 +571,13 @@ public fun open_dispute(
     dispute.share_dispute(ctx);
 }
 
-/// Draws initial nivsters after both parties have accepted the case
-entry fun draw_initial_nivsters(
-    court: &mut Court,
-    dispute: &mut Dispute,
-    clock: &Clock,
-    r: &Random,
-    ctx: &mut TxContext,
-) {
-    assert!(dispute.is_draw_period(clock), ENotDrawPeriod);
-
-    let self = court.load_inner_mut();
-    let dispute_id = object::id(dispute);
-
-    self.draw_nivsters(
-        dispute.voters_mut(), 
-        INIT_NIVSTER_COUNT, 
-        dispute_id,
-        r, 
-        ctx
-    );
-
-    distribute_voter_caps(dispute.voters_mut(), dispute_id, ctx);
-    dispute.set_status(dispute_status_active());
-
-    event::emit(DisputeInitialNivstersDrawnEvent { 
-        dispute_id, 
-        initiator: ctx.sender(), 
-    });
-}
-
 /// Starts a new appeal round for an existing dispute.
-/// 
-/// Each appeal increases the number of jurors ("nivsters") assigned to the
-/// dispute. After appeal round `i`, the total juror count `J` is:
-///
-/// `J = 2^i * N + (2^i - 1) + T`
-///
-/// where:
-/// - `i` is the current appeal count
-/// - `N` is the initial juror count
-/// - `T` is the number of additional jurors drawn due to tie resolutions
-/// 
-/// The appeal fee `F` grows exponentially with each round `i` and must be paid 
-/// by an authorized dispute party to initiate the appeal:
-/// 
-/// `F = (13/5)^i * Fn`
-/// 
-/// where:
-/// - `i` is the current appeal count
-/// - `Fn` is the court's base dispute fee
-/// 
-/// Aborts if:
-/// - The provided party capability does not correspond to the dispute
-/// - The dispute is not in a state where appeals are allowed
-/// - The dispute has reached the maximum number of appeals
-/// - The worker pool does not contain enough eligible jurors to extend the case
-/// 
-/// Emits:
-/// - `DisputeAppealEvent` recording the start of an appeal round
-entry fun open_appeal(
+public fun open_appeal(
     court: &mut Court,
     dispute: &mut Dispute,
     fee: Coin<SUI>,
     cap: &PartyCap,
     clock: &Clock,
-    r: &Random,
-    ctx: &mut TxContext,
 ) {
     assert!(object::id(dispute) == cap.dispute_id_party(), EInvalidPartyCap);
     assert!(dispute.parties().contains(&cap.party()), EInvalidPartyCap);
@@ -645,45 +587,24 @@ entry fun open_appeal(
     let self = court.load_inner_mut();
     let appeal_count = dispute.appeals_used() + 1;
 
-    // Fee = 13^i * Fn / 5^i, where Fn = base dispute fee & i = appeal count.
-    // The appeal count is hard capped at 3.
-    let appeal_fee = std::u128::divide_and_round_up(
-        dispute.dispute_fee() as u128 * std::u128::pow(13, appeal_count), 
-        std::u128::pow(5, appeal_count)
-    );
+    let appeal_fee = dispute_fee(dispute.dispute_fee(), appeal_count);
     assert!(fee.value() == appeal_fee as u64, EInvalidFee);
 
-    // Increment amount = 2^(i-1) * (N + 1), where N = initial nivster count 
-    // & i = appeal count.
-    let nivster_count = std::u64::pow(2, appeal_count - 1) * 
-    (INIT_NIVSTER_COUNT + 1);
-    let dispute_id = object::id(dispute);
-
-    self.draw_nivsters(
-        dispute.voters_mut(), 
-        nivster_count, 
-        dispute_id,
-        r, 
-        ctx
-    );
-
     let case = self.cases.borrow_mut(dispute.contract());
-    // Both depositors must exist by now since appeal can be only raised after
-    // a successful round, where both parties have made a deposit.
+    // NOTE: Both depositors must exist by now.
     let deposit = case.get_mut(dispute.serialized_config())
     .depositors
     .get_mut(&cap.party());
     *deposit = *deposit + fee.value();
 
-    // Start a new appeal round
-    dispute.start_new_round_appeal(clock, ctx);
+    self.reward_pool.join(fee.into_balance());
 
     event::emit(DisputeAppealEvent { 
-        dispute_id, 
+        dispute_id: object::id(dispute), 
         initiator: cap.party(),
     });
 
-    self.reward_pool.join(fee.into_balance());
+    dispute.start_response_period_appeal(clock);
 }
 
 /// Accepts an open dispute or appeal by the opposing party and deposits
@@ -702,37 +623,34 @@ public fun accept_dispute(
     let self = court.load_inner_mut();
     let appeal_count = dispute.appeals_used();
 
-    // Fee = 13^i * Fn / 5^i, where Fn = base dispute fee & i = appeal count.
-    let outstanding_fee = std::u128::divide_and_round_up(
-        dispute.dispute_fee() as u128 * std::u128::pow(13, appeal_count), 
-        std::u128::pow(5, appeal_count)
-    );
-    assert!(fee.value() == outstanding_fee as u64, EInvalidFee);
+    let dispute_fee = dispute_fee(dispute.dispute_fee(), appeal_count);
+    assert!(fee.value() == dispute_fee as u64, EInvalidFee);
 
     let case = self.cases.borrow_mut(dispute.contract());
     let depositors = &mut case
     .get_mut(dispute.serialized_config())
     .depositors;
 
-    if (depositors.length() == 2) {
-        // Dispute appeal scenario.
-        let payer_balance = depositors.get_mut(&cap.party());
-        
-        *payer_balance = *payer_balance + fee.value();
-
-        let (_, balance_1) = depositors.get_entry_by_idx(0);
-        let (_, balance_2) = depositors.get_entry_by_idx(1);
-
-        assert!(*balance_1 == *balance_2, EWrongParty);
-
-        dispute.set_status(dispute_status_active());
-    } else {
-        // Dispute opening scenario. The other party has not made deposits yet.
-        assert!(!depositors.contains(&cap.party()), EWrongParty);
+    if (!depositors.contains(&cap.party())) {
         depositors.insert(cap.party(), fee.value());
-
-        dispute.set_status(dispute_status_draw());
+    } else {
+        let payer_balance = depositors.get_mut(&cap.party());
+        *payer_balance = *payer_balance + fee.value();
     };
+
+    assert!(depositors.length() == 2, EWrongParty);
+
+    let total_fee = total_dispute_fee(
+        dispute.dispute_fee(), 
+        appeal_count
+    );
+
+    let (_, balance_1) = depositors.get_entry_by_idx(0);
+    let (_, balance_2) = depositors.get_entry_by_idx(1);
+
+    // Both of the parties must have paid exactly the total fee amount.
+    assert!(balance_1 == total_fee, EWrongParty);
+    assert!(balance_2 == total_fee, EWrongParty);
 
     event::emit(DisputeAcceptEvent {
         dispute_id: object::id(dispute),
@@ -740,6 +658,45 @@ public fun accept_dispute(
     });
 
     self.reward_pool.join(fee.into_balance());
+    dispute.start_draw_period(clock);
+}
+
+/// Draws nivsters for the round after both parties have accepted the case.
+entry fun draw_new_nivsters(
+    self: &mut Court,
+    dispute: &mut Dispute,
+    clock: &Clock,
+    r: &Random,
+    ctx: &mut TxContext,
+) {
+    assert!(dispute.is_draw_period(clock), ENotDrawPeriod);
+
+    let self = self.load_inner_mut();
+    let dispute_id = object::id(dispute);
+    let appeal_count = dispute.appeals_used();
+
+    // The nivster count grows by 2^(i-1) * (N + 1) on appeal rounds, where 
+    // i = appeal count and N = the initial nivster count.
+    let nivster_count = if (appeal_count > 0) {
+        std::u64::pow(2, appeal_count - 1) * (INIT_NIVSTER_COUNT + 1)
+    } else {
+        INIT_NIVSTER_COUNT
+    };
+
+    self.draw_nivsters(
+        dispute.voters_mut(), 
+        nivster_count, 
+        dispute_id,
+        r, 
+        ctx
+    );
+
+    event::emit(DisputeNivstersDrawnEvent { 
+        dispute_id, 
+        initiator: ctx.sender(), 
+    });
+
+    dispute.start_new_round(clock, ctx);
 }
 
 /// Handles dispute ties by drawing more nivsters and starting a new round.
@@ -768,12 +725,13 @@ entry fun handle_dispute_tie(
         r, 
         ctx
     );
-    dispute.start_new_round_tie(clock, ctx);
 
     event::emit(DisputeTieNivstersDrawnEvent { 
         dispute_id,
         initiator: ctx.sender(), 
     });
+
+    dispute.start_new_round_tie(clock, ctx);
 }
 
 /// Cancels a failed or abandoned dispute.
@@ -1667,6 +1625,29 @@ public(package) fun load_inner(self: &Court): &CourtInner {
     inner
 }
 
+/// Calculates dispute fee for the give round.
+public(package) fun dispute_fee(dispute_fee: u64, appeal_count: u8): u64 {
+    let fee = std::u128::divide_and_round_up(
+        dispute_fee as u128 * std::u128::pow(13, appeal_count), 
+        std::u128::pow(5, appeal_count)
+    );
+
+    fee as u64
+}
+
+/// Calculates cumulative fee up to this round.
+public(package) fun total_dispute_fee(dispute_fee: u64, appeal_count: u8): u64 {
+    let mut sum = 0;
+    let mut i = 0;
+
+    while (i <= appeal_count) {
+        sum = sum + dispute_fee(dispute_fee, i);
+        i = i + 1;
+    };
+
+    sum
+}
+
 /// Calculates the total reward amount R that treasury takes from the deposited 
 /// fees.
 /// 
@@ -1682,19 +1663,7 @@ public(package) fun treasury_take(
     appeals: u8,
     init_nivster_count: u64,
 ): u64 {
-    let mut r = 0;
-    let mut i = 0;
-
-    while (i <= appeals) {
-        let appeal_fee = std::u128::divide_and_round_up(
-            dispute_fee as u128 * std::u128::pow(13, i), 
-            std::u128::pow(5, i)
-        );
-
-        r = r + (appeal_fee as u64);
-        i = i + 1;
-    };
-
+    let r = total_dispute_fee(dispute_fee, appeals);
     let t = nivsters_take(
         dispute_fee, 
         treasury_share, 
@@ -1857,6 +1826,20 @@ public(package) fun minority_penalties_and_majority_stakes(
 }
 
 // === Private Functions ===
+fun dispute_exists_for_contract(
+    self: &CourtInner,
+    contract_id: ID,
+    serialized_config: &vector<u8>,
+): bool {
+    if (!self.cases.contains(contract_id)) {
+        false
+    } else {
+        let case = self.cases.borrow(contract_id);
+
+        case.contains(serialized_config)
+    }
+}
+
 fun remove_from_worker_pool(
     self: &mut CourtInner,
     addr: address,
