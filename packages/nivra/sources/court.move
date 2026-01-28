@@ -64,6 +64,7 @@ const PARTY_COUNT: u64 = 2;
 const MAX_APPEALS: u8 = 3;
 const MAX_DESCRIPTION_LEN: u64 = 2000;
 const MAX_OPTION_LEN: u64 = 255;
+const MAX_INIT_NIVSTERS: u64 = 11;
 const MAX_NIVSTER_COUNT: u64 = 100;
 
 // === Errors ===
@@ -89,6 +90,7 @@ const ENotDrawPeriod: u64 = 43;
 const EOptionEmpty: u64 = 44;
 const EDisputeAlreadyExists: u64 = 45;
 const ETooManyNivsters: u64 = 46;
+const ETooHighNivsterCount: u64 = 47;
 
 #[error]
 const EOptionTooLong: vector<u8> =
@@ -1249,6 +1251,7 @@ public fun create_court(
     assert!(empty_vote_penalty <= 100, EInvalidTreasuryShareInternal);
     assert!(sanction_model < 3, EInvalidSanctionModelInternal);
     assert!(min_stake > 0, EZeroMinStakeInternal);
+    assert!(init_nivster_count <= MAX_INIT_NIVSTERS, ETooHighNivsterCount);
 
     // Seal limitations.
     assert!(key_servers.length() == public_keys.length(), EInvalidKeyConfigInternal);
