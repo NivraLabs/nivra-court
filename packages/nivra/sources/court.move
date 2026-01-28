@@ -57,7 +57,6 @@ const FIXED_PERCENTAGE_MODEL: u64 = 0;
 const MINORITY_SCALED_MODEL: u64 = 1;
 const QUADRATIC_MODEL: u64 = 2;
 // Default dispute rules
-const INIT_NIVSTER_COUNT: u64 = 1;
 const TIE_NIVSTER_COUNT: u64 = 1;
 const MIN_OPTIONS: u64 = 2;
 const MAX_OPTIONS: u64 = 5;
@@ -65,6 +64,7 @@ const PARTY_COUNT: u64 = 2;
 const MAX_APPEALS: u8 = 3;
 const MAX_DESCRIPTION_LEN: u64 = 2000;
 const MAX_OPTION_LEN: u64 = 255;
+const MAX_NIVSTER_COUNT: u64 = 100;
 
 // === Errors ===
 const EWrongVersion: u64 = 1;
@@ -205,6 +205,7 @@ public struct CourtInner has store {
     allowed_versions: VecSet<u64>,
     status: Status,
     ai_court: bool,
+    init_nivster_count: u64,
     sanction_model: u64,
     coefficient: u64,
     treasury_share: u64,
@@ -546,6 +547,7 @@ public fun open_dispute(
         self.treasury_share,
         self.treasury_share_nvr,
         self.empty_vote_penalty,
+        self.init_nivster_count,
         clock, 
         ctx
     );
@@ -679,9 +681,9 @@ entry fun draw_new_nivsters(
     // The nivster count grows by 2^(i-1) * (N + 1) on appeal rounds, where 
     // i = appeal count and N = the initial nivster count.
     let nivster_count = if (appeal_count > 0) {
-        std::u64::pow(2, appeal_count - 1) * (INIT_NIVSTER_COUNT + 1)
+        std::u64::pow(2, appeal_count - 1) * (dispute.init_nivster_count() + 1)
     } else {
-        INIT_NIVSTER_COUNT
+        dispute.init_nivster_count()
     };
 
     self.draw_nivsters(
@@ -791,17 +793,17 @@ public fun resolve_one_sided_dispute(
     // The case is left to the case map intentionally, so that another case
     // can't be opened for the contract with same configurations.
     let dispute_details = self.cases.borrow(dispute.contract())
-    .get(dispute.serialized_config());
+        .get(dispute.serialized_config());
 
-    // At least 1 party has made a deposit at this point.
+    // NOTE: At least 1 party has made a deposit at this point.
     let (mut refund_party, mut refund_amount) = dispute_details.depositors
-    .get_entry_by_idx(0);
+        .get_entry_by_idx(0);
 
     // Check if the counter party has made a deposit greater than the first 
     // party.
     if (dispute_details.depositors.length() == 2) {
         let (party_2, amount_2) = dispute_details.depositors
-        .get_entry_by_idx(1);
+            .get_entry_by_idx(1);
 
         if (*amount_2 > *refund_amount) {
             refund_party = party_2;
@@ -837,7 +839,7 @@ public fun resolve_one_sided_dispute(
             dispute.dispute_fee(), 
             dispute.treasury_share(), 
             dispute.appeals_used() - 1,
-            INIT_NIVSTER_COUNT
+            dispute.init_nivster_count()
         );
 
         transfer::public_transfer(
@@ -900,7 +902,7 @@ public fun complete_dispute(
         dispute.dispute_fee(), 
         dispute.treasury_share(), 
         dispute.appeals_used(),
-        INIT_NIVSTER_COUNT
+        dispute.init_nivster_count()
     );
 
     transfer::public_transfer(
@@ -1008,7 +1010,7 @@ public fun collect_rewards_one_sided(
             dispute.dispute_fee(), 
             dispute.treasury_share(), 
             appeals_used - 1,
-            INIT_NIVSTER_COUNT
+            dispute.init_nivster_count()
         );
 
         let sui_cut = total_cut * voter_details.stake() / total_stake_sum;
@@ -1174,7 +1176,7 @@ public fun collect_rewards_completed(
         dispute.dispute_fee(), 
         dispute.treasury_share(), 
         dispute.appeals_used(),
-        INIT_NIVSTER_COUNT
+        dispute.init_nivster_count()
     );
 
     // Distribute reward based on staked amount.
@@ -1219,6 +1221,7 @@ public fun create_court(
     court_registry: &mut CourtRegistry,
     cap: &NivraAdminCap,
     ai_court: bool,
+    init_nivster_count: u64,
     category: String,
     name: String,
     description: String,
@@ -1265,6 +1268,7 @@ public fun create_court(
         allowed_versions: court_registry.allowed_versions(),
         status: Status::Running,
         ai_court,
+        init_nivster_count,
         sanction_model,
         coefficient,
         treasury_share,
@@ -1484,11 +1488,12 @@ public(package) fun draw_nivsters(
     r: &Random,
     ctx: &mut TxContext,
 ) {
-    // Check if there are enough nivsters for the draw.
     let potential_nivsters: u64 = self.worker_pool.length();
     assert!(potential_nivsters >= nivster_count, ENotEnoughNivsters);
-
-    assert!(nivsters.length() + nivster_count <= 100, ETooManyNivsters);
+    assert!(
+        nivsters.length() + nivster_count <= MAX_NIVSTER_COUNT, 
+        ETooManyNivsters
+    );
 
     let mut nivsters_selected = 0;
     let mut generator = new_generator(r, ctx);

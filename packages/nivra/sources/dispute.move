@@ -93,6 +93,7 @@ public struct EconomicParams has copy, drop, store {
     treasury_share: u64,
     treasury_share_nvr: u64,
     empty_vote_penalty: u64,
+    init_nivster_count: u64,
 }
 
 public struct Dispute has key {
@@ -466,6 +467,10 @@ public fun treasury_share_nvr(dispute: &Dispute): u64 {
     dispute.economic_params.treasury_share_nvr
 }
 
+public fun init_nivster_count(dispute: &Dispute): u64 {
+    dispute.economic_params.init_nivster_count
+}
+
 public fun max_appeals(dispute: &Dispute): u8 {
     dispute.max_appeals
 }
@@ -746,6 +751,7 @@ public(package) fun create_dispute(
     treasury_share: u64,
     treasury_share_nvr: u64,
     empty_vote_penalty: u64,
+    init_nivster_count: u64,
     clock: &Clock,
     ctx: &mut TxContext,
 ): Dispute {
@@ -787,6 +793,7 @@ public(package) fun create_dispute(
             treasury_share,
             treasury_share_nvr,
             empty_vote_penalty,
+            init_nivster_count,
         },
     }
 }
