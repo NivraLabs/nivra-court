@@ -496,10 +496,10 @@ public fun open_dispute(
     assert!(parties.contains(&ctx.sender()), EInitiatorNotParty);
     assert!(max_appeals <= MAX_APPEALS, EInvalidAppealCount);
     assert!(description.length() <= MAX_DESCRIPTION_LEN, EDescriptionTooLong);
-
-    // TODO: Allow party vote only
     assert!(
-        (options.length() >= MIN_OPTIONS && options.length() <= MAX_OPTIONS), 
+        (options.length() == 0) ||
+            ((options.length() >= MIN_OPTIONS) && 
+                (options.length() <= MAX_OPTIONS)), 
         EInvalidOptionsAmount
     );
 
@@ -587,8 +587,8 @@ public fun open_appeal(
     let self = court.load_inner_mut();
     let appeal_count = dispute.appeals_used() + 1;
 
-    let appeal_fee = dispute_fee(dispute.dispute_fee(), appeal_count);
-    assert!(fee.value() == appeal_fee as u64, EInvalidFee);
+    let dispute_fee = dispute_fee(dispute.dispute_fee(), appeal_count);
+    assert!(fee.value() == dispute_fee, EInvalidFee);
 
     let case = self.cases.borrow_mut(dispute.contract());
     // NOTE: Both depositors must exist by now.

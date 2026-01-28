@@ -129,7 +129,7 @@ public struct DisputeTalliedTieEvent has copy, drop {
 
 public struct DisputeTalliedEvent has copy, drop {
     dispute_id: ID,
-    winner_option: u8,
+    winner_option: Option<u8>,
     winner_party: u8,
 }
 
@@ -215,6 +215,7 @@ public fun finalize_vote(
         .key_servers
         .zip_map!(dispute.public_keys, |ks, pk| new_public_key(ks.to_id(), pk));
     
+    // NOTE: options length is allowed to be 0.
     let mut result = vector::tabulate!(dispute.options.length(), |_| 0);
     let mut party_result = vector::tabulate!(dispute.parties.length(), |_| 0);
     let mut i = linked_table::front(&dispute.voters);
@@ -223,7 +224,6 @@ public fun finalize_vote(
         let k = *i.borrow();
         let v = dispute.voters.borrow_mut(k);
 
-        // Decrypt vote
         v.vote.do_ref!(|vote| {
             decrypt(vote, &verified_derived_keys, &all_public_keys)
             .do_ref!(|decrypted| {
@@ -654,21 +654,29 @@ public(package) fun tally_votes(dispute: &mut Dispute) {
         };
     });
 
-    if (highest_option == second_highest_option || highest_party_option == second_highest_party_option) {
+    let options_tie = (highest_option == second_highest_option) && 
+        (dispute.options.length() > 0);
+    let parties_tie = highest_party_option == second_highest_party_option;
+
+    if (options_tie || parties_tie) {
         dispute.status = dispute_status_tie();
 
         event::emit(DisputeTalliedTieEvent { 
             dispute_id: object::id(dispute),
         });
     } else {
-        dispute.winner_option = dispute.result.find_index!(|res| res == highest_option).map!(|res| res as u8);
-        dispute.winner_party = dispute.party_result.find_index!(|res| res == highest_party_option).map!(|res| res as u8);
+        dispute.winner_option = dispute.result
+            .find_index!(|res| res == highest_option)
+            .map!(|res| res as u8);
+        dispute.winner_party = dispute.party_result
+            .find_index!(|res| res == highest_party_option)
+            .map!(|res| res as u8);
         dispute.status = dispute_status_tallied();
 
         event::emit(DisputeTalliedEvent {
             dispute_id: object::id(dispute),
-            winner_option: dispute.winner_option.extract(),
-            winner_party: dispute.winner_party.extract(),
+            winner_option: dispute.winner_option,
+            winner_party: *dispute.winner_party.borrow(),
         });
     };
 }
