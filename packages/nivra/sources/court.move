@@ -236,12 +236,6 @@ public struct BalanceLockedEvent has copy, drop {
     dispute_id: ID,
 }
 
-public struct BalanceUnlockedEvent has copy, drop {
-    nivster: address,
-    amount_nvr: u64,
-    dispute_id: ID,
-}
-
 public struct BalanceRewardEvent has copy, drop {
     nivster: address,
     amount_nvr: u64,
@@ -754,23 +748,14 @@ public fun cancel_dispute(
     while(i.is_some()) {
         let k = *i.borrow();
         let v = voters.borrow(k);
-        let stake = self.stakes.borrow_mut(k);
 
-        stake.amount = stake.amount + v.stake();
-        stake.locked_amount = stake.locked_amount - v.stake();
-
-        if (stake.worker_pool_pos.is_some()) {
-            self.worker_pool.add_stake(
-                *stake.worker_pool_pos.borrow(), 
-                v.stake(),
-            );
-        };
-        
-        event::emit(BalanceUnlockedEvent {
-            nivster: k,
-            amount_nvr: v.stake(),
-            dispute_id,
-        });
+        unlock_stake_with_penalty(
+            self, 
+            k, 
+            v.stake(), 
+            0, 
+            dispute_id
+        );
 
         i = voters.next(k);
     };
@@ -838,31 +823,20 @@ public fun resolve_one_sided_dispute(
     while(i.is_some()) {
         let k = *i.borrow();
         let v = voters.borrow(k);
-        let stake = self.stakes.borrow_mut(k);
 
         // NOTE: min_stake is always > 0.
         let reward = (nivsters_take as u128) * (v.stake() as u128) / 
             (total_stake_sum as u128);
         remaining_fees = remaining_fees - (reward as u64);
 
-        stake.amount = stake.amount + v.stake();
-        stake.locked_amount = stake.locked_amount - v.stake();
-        stake.reward_amount = stake.reward_amount + (reward as u64);
-
-        if (stake.worker_pool_pos.is_some()) {
-            self.worker_pool.add_stake(
-                *stake.worker_pool_pos.borrow(), 
-                v.stake(),
-            );
-        };
-        
-        event::emit(BalanceRewardEvent {
-            nivster: k,
-            amount_nvr: 0,
-            amount_sui: (reward as u64),
-            unlocked_nvr: v.stake(),
-            dispute_id,
-        });
+        unlock_stake_with_rewards(
+            self, 
+            k, 
+            v.stake(), 
+            0, 
+            (reward as u64), 
+            dispute_id
+        );
 
         i = voters.next(k);
     };
@@ -933,7 +907,6 @@ public fun complete_dispute(
     while(i.is_some()) {
         let k = *i.borrow();
         let v = voters.borrow(k);
-        let stake = self.stakes.borrow_mut(k);
 
         let decrypted_vote = if (party_vote) {
             v.decrypted_party_vote()
@@ -942,24 +915,13 @@ public fun complete_dispute(
         };
 
         if (decrypted_vote.is_none()) {
-            let penalty = v.stake() * dispute.empty_vote_penalty() / 100;
-
-            stake.amount = stake.amount + v.stake() - penalty;
-            stake.locked_amount = stake.locked_amount - v.stake();
-
-            if (stake.worker_pool_pos.is_some()) {
-                self.worker_pool.add_stake(
-                    *stake.worker_pool_pos.borrow(), 
-                    v.stake() - penalty,
-                );
-            };
-
-            event::emit(BalancePenaltyEvent {
-                nivster: k,
-                amount_nvr: penalty,
-                unlocked_nvr: v.stake(),
-                dispute_id,
-            });
+            unlock_stake_with_penalty(
+                self, 
+                k, 
+                v.stake(), 
+                v.stake() * dispute.empty_vote_penalty() / 100, 
+                dispute_id
+            );
         } else {
             let vote = *decrypted_vote.borrow();
 
@@ -973,49 +935,28 @@ public fun complete_dispute(
                 remaining_fees = remaining_fees - (sui_reward as u64);
                 remaining_penalties = remaining_penalties - (nvr_reward as u64);
 
-                stake.amount = stake.amount + v.stake() + (nvr_reward as u64);
-                stake.locked_amount = stake.locked_amount - v.stake();
-                stake.reward_amount = stake.reward_amount + (sui_reward as u64);
-
-                if (stake.worker_pool_pos.is_some()) {
-                    self.worker_pool.add_stake(
-                        *stake.worker_pool_pos.borrow(), 
-                        v.stake() + nvr_reward,
-                    );
-                };
-
-                event::emit(BalanceRewardEvent {
-                    nivster: k,
-                    amount_nvr: (nvr_reward as u64),
-                    amount_sui: (sui_reward as u64),
-                    unlocked_nvr: v.stake(),
-                    dispute_id,
-                });
-            } else {
-                let penalty = penalty(
-                    dispute.sanction_model(), 
-                    dispute.coefficient(), 
+                unlock_stake_with_rewards(
+                    self, 
+                    k, 
                     v.stake(), 
-                    total_votes, 
-                    winner_votes
+                    (nvr_reward as u64), 
+                    (sui_reward as u64), 
+                    dispute_id
                 );
-
-                stake.amount = stake.amount + v.stake() - penalty;
-                stake.locked_amount = stake.locked_amount - v.stake();
-
-                if (stake.worker_pool_pos.is_some()) {
-                    self.worker_pool.add_stake(
-                        *stake.worker_pool_pos.borrow(), 
-                        v.stake() - penalty,
-                    );
-                };
-
-                event::emit(BalancePenaltyEvent {
-                    nivster: k,
-                    amount_nvr: penalty,
-                    unlocked_nvr: v.stake(),
-                    dispute_id,
-                });
+            } else {
+                unlock_stake_with_penalty(
+                    self, 
+                    k, 
+                    v.stake(), 
+                    penalty(
+                        dispute.sanction_model(), 
+                        dispute.coefficient(), 
+                        v.stake(), 
+                        total_votes, 
+                        winner_votes
+                    ), 
+                    dispute_id
+                );
             };
         };
 
@@ -1704,4 +1645,61 @@ fun pentalties_and_majority(dispute: &Dispute): (u64, u64) {
     };
 
     (p, s)
+}
+
+fun unlock_stake_with_penalty(
+    self: &mut CourtInner, 
+    key: address, 
+    amount: u64,
+    penalty: u64,
+    dispute_id: ID,
+) {
+    let stake = self.stakes.borrow_mut(key);
+
+    stake.amount = stake.amount + amount - penalty;
+    stake.locked_amount = stake.locked_amount - amount;
+
+    if (stake.worker_pool_pos.is_some()) {
+        self.worker_pool.add_stake(
+            *stake.worker_pool_pos.borrow(), 
+            amount - penalty,
+        );
+    };
+
+    event::emit(BalancePenaltyEvent {
+        nivster: key,
+        amount_nvr: penalty,
+        unlocked_nvr: amount,
+        dispute_id,
+    });
+}
+
+fun unlock_stake_with_rewards(
+    self: &mut CourtInner, 
+    key: address, 
+    amount: u64,
+    reward_nvr: u64,
+    reward_sui: u64,
+    dispute_id: ID,
+) {
+    let stake = self.stakes.borrow_mut(key);
+
+    stake.amount = stake.amount + amount + reward_nvr;
+    stake.locked_amount = stake.locked_amount - amount;
+    stake.reward_amount = stake.reward_amount + reward_sui;
+
+    if (stake.worker_pool_pos.is_some()) {
+        self.worker_pool.add_stake(
+            *stake.worker_pool_pos.borrow(), 
+            amount + reward_nvr,
+        );
+    };
+
+    event::emit(BalanceRewardEvent {
+        nivster: key,
+        amount_nvr: reward_nvr,
+        amount_sui: reward_sui,
+        unlocked_nvr: amount,
+        dispute_id,
+    });
 }
