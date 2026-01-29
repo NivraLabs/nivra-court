@@ -135,6 +135,10 @@ public struct DisputeTalliedEvent has copy, drop {
     winner_party: u8,
 }
 
+// === Method Aliases ===
+use fun nivra::utils::do as LinkedTable.do;
+use fun nivra::utils::do_ref as LinkedTable.do_ref;
+
 // === Public Functions ===
 fun init(otw: DISPUTE, ctx: &mut TxContext) {
     let publisher = sui::package::claim(otw, ctx);
@@ -220,12 +224,8 @@ public fun finalize_vote(
     // NOTE: options length is allowed to be 0.
     let mut result = vector::tabulate!(dispute.options.length(), |_| 0);
     let mut party_result = vector::tabulate!(dispute.parties.length(), |_| 0);
-    let mut i = linked_table::front(&dispute.voters);
 
-    while(i.is_some()) {
-        let k = *i.borrow();
-        let v = dispute.voters.borrow_mut(k);
-
+    dispute.voters.do!(|_, v| {
         v.vote.do_ref!(|vote| {
             decrypt(vote, &verified_derived_keys, &all_public_keys)
             .do_ref!(|decrypted| {
@@ -246,9 +246,7 @@ public fun finalize_vote(
                 };
             });
         });
-
-        i = dispute.voters.next(k);
-    };
+    });
 
     dispute.result = result;
     dispute.party_result = party_result;
@@ -400,16 +398,11 @@ public fun has_appeals_left(dispute: &Dispute): bool {
 }
 
 public fun total_stake_sum(dispute: &Dispute): u64 {
-    let mut i = dispute.voters.front();
     let mut s = 0;
 
-    while (i.is_some()) {
-        let k = *i.borrow();
-        let v = dispute.voters.borrow(k);
-
+    dispute.voters.do_ref!(|_,v| {
         s = s + v.stake;
-        i = dispute.voters.next(k);
-    };
+    });
 
     s
 }
@@ -786,7 +779,6 @@ public(package) fun create_dispute(
     appeal_period_ms: u64,
     max_appeals: u8,
     parties: vector<address>,
-    voters: LinkedTable<address, VoterDetails>,
     options: vector<String>,
     key_servers: vector<address>,
     public_keys: vector<vector<u8>>,
@@ -824,7 +816,7 @@ public(package) fun create_dispute(
         appeals_used: 0,
         parties,
         evidence: vec_map::empty(),
-        voters,
+        voters: linked_table::new(ctx),
         options,
         result: vector[],
         party_result: vector[],
@@ -911,18 +903,11 @@ public(package) fun create_voter_details(stake: u64): VoterDetails {
 
 // === Private Functions ===
 fun reset_votes(self: &mut Dispute) {
-    let mut i = linked_table::front(&self.voters);
-
-    while(i.is_some()) {
-        let k = *i.borrow();
-        let v = self.voters.borrow_mut(k);
-
+    self.voters.do!(|_, v| {
         v.vote = option::none();
         v.decrypted_vote = option::none();
         v.decrypted_party_vote = option::none();
-
-        i = self.voters.next(k);
-    };
+    });
 }
 
 // === Test Functions ===

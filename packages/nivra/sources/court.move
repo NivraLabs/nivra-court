@@ -316,6 +316,8 @@ public struct NivsterSelectionEvent has copy, drop {
     reselected: bool,
     locked_amount: u64,
 }
+// === Method Aliases ===
+use fun nivra::utils::do_ref as LinkedTable.do_ref;
 
 // === Public Functions ===
 /// Adds stake to the court.
@@ -490,10 +492,25 @@ public fun open_dispute(
         assert!(option.length() <= MAX_OPTION_LEN, EOptionTooLong);
     });
 
+    let mut parties_sorted = parties;
+    let mut options_sorted = options;
+
+    parties_sorted.insertion_sort_by!(|a, b| (*a).to_u256() < (*b).to_u256());
+    options_sorted.insertion_sort_by!(|a, b| {
+        bytes_lt(a.as_bytes(), b.as_bytes())
+    });
+
+    let mut i = 1;
+
+    while (i < options_sorted.length()) {
+        assert!(options_sorted[i - 1] != options_sorted[i], EDuplicateOptions);
+        i = i + 1;
+    };
+
     let serialized_config = serialize_dispute_config(
         contract, 
-        parties, 
-        options, 
+        parties_sorted, 
+        options_sorted, 
         max_appeals
     );
 
@@ -514,8 +531,7 @@ public fun open_dispute(
         self.timetable.default_voting_period_ms, 
         self.timetable.default_appeal_period_ms, 
         max_appeals, 
-        parties, 
-        linked_table::new(ctx), 
+        parties,
         options, 
         self.key_servers, 
         self.public_keys, 
@@ -732,14 +748,9 @@ public fun cancel_dispute(
     };
 
     // Refund voters
-    let voters = dispute.voters();
     let dispute_id = object::id(dispute);
-    let mut i = linked_table::front(voters);
 
-    while(i.is_some()) {
-        let k = *i.borrow();
-        let v = voters.borrow(k);
-
+    dispute.voters().do_ref!(|k, v| {
         unlock_stake_with_penalty(
             self, 
             k, 
@@ -747,9 +758,7 @@ public fun cancel_dispute(
             0, 
             dispute_id
         );
-
-        i = voters.next(k);
-    };
+    });
 
     event::emit(DisputeCancelEvent { 
         dispute_id,
@@ -806,15 +815,10 @@ public fun resolve_one_sided_dispute(
         );
     };
 
-    let voters = dispute.voters();
     let dispute_id = object::id(dispute);
     let total_stake_sum = dispute.total_stake_sum();
-    let mut i = linked_table::front(voters);
 
-    while(i.is_some()) {
-        let k = *i.borrow();
-        let v = voters.borrow(k);
-
+    dispute.voters().do_ref!(|k, v| {
         // NOTE: min_stake is always > 0.
         let reward = (nivsters_take as u128) * (v.stake() as u128) / 
             (total_stake_sum as u128);
@@ -828,9 +832,7 @@ public fun resolve_one_sided_dispute(
             (reward as u64), 
             dispute_id
         );
-
-        i = voters.next(k);
-    };
+    });
 
     // Protocol fee.
     transfer::public_transfer(
@@ -891,14 +893,8 @@ public fun complete_dispute(
     let (total_votes, winner_option, winner_votes) = vote_params(dispute);
     let dispute_id = object::id(dispute);
     let party_vote = dispute.winner_option().is_none();
-    let voters = dispute.voters();
 
-    let mut i = linked_table::front(voters);
-
-    while(i.is_some()) {
-        let k = *i.borrow();
-        let v = voters.borrow(k);
-
+    dispute.voters().do_ref!(|k, v| {
         let decrypted_vote = if (party_vote) {
             v.decrypted_party_vote()
         } else {
@@ -950,9 +946,7 @@ public fun complete_dispute(
                 );
             };
         };
-
-        i = voters.next(k);
-    };
+    });
 
     // Protocol fees.
     transfer::public_transfer(
@@ -1459,21 +1453,6 @@ public(package) fun serialize_dispute_config(
     max_appeals: u8,
 ): vector<u8> {
     let mut serialized: vector<u8> = vector::empty();
-    let mut parties = parties;
-    let mut options = options;
-
-    parties.insertion_sort_by!(|a, b| (*a).to_u256() < (*b).to_u256());
-    options.insertion_sort_by!(|a, b| {
-        bytes_lt(a.as_bytes(), b.as_bytes())
-    });
-
-    // Check for duplicates after sorting to save gas.
-    let mut i = 1;
-
-    while (i < options.length()) {
-        assert!(options[i - 1] != options[i], EDuplicateOptions);
-        i = i + 1;
-    };
 
     serialized.append(object::id_to_bytes(&contract_id));
     parties.do!(|addr| serialized.append(addr.to_bytes()));
@@ -1588,19 +1567,13 @@ fun vote_params(dispute: &Dispute): (u64, u8, u64) {
 
 fun pentalties_and_majority(dispute: &Dispute): (u64, u64) {
     let party_vote = dispute.winner_option().is_none();
-    let voters = dispute.voters();
     let mut p = 0;
     let mut s = 0;
 
     let (total_votes, winner_option, winner_votes) = 
         vote_params(dispute);
-    
-    let mut i = linked_table::front(voters);
         
-    while(i.is_some()) {
-        let k = *i.borrow();
-        let v = voters.borrow(k);
-
+    dispute.voters().do_ref!(|_, v| {
         let decrypted_vote = if (party_vote) {
             v.decrypted_party_vote()
         } else {
@@ -1624,9 +1597,7 @@ fun pentalties_and_majority(dispute: &Dispute): (u64, u64) {
                 );
             }
         };
-
-        i = voters.next(k);
-    };
+    });
 
     (p, s)
 }

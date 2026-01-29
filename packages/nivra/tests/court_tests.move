@@ -2,64 +2,6 @@
 module nivra::court_tests;
 
 use nivra::court::nivsters_take;
-use std::string::String;
-use nivra::court::serialize_dispute_config;
-
-/// This test validates that the same dispute configs with different ordering
-/// have the same serialization value. 
-#[test]
-fun test_serialize_dispute_config() {
-    let alice = @0x1;
-    let bob = @0x2;
-    let mut scenario = sui::test_scenario::begin(alice);
-
-    let contract_id = 
-    object::new(sui::test_scenario::ctx(&mut scenario));
-    let mut parties: vector<address> = vector::empty();
-    let mut parties_reversed: vector<address> = vector::empty();
-    let mut options: vector<String> = vector::empty();
-    let mut options_reordered: vector<String> = vector::empty();
-
-    // Populate parties
-    parties.push_back(alice);
-    parties.push_back(bob);
-    parties_reversed.push_back(bob);
-    parties_reversed.push_back(alice);
-
-    // Populate options
-    let option_1: String = "yes";
-    let option_2: String = "yse";
-    let option_3: String = "test";
-
-    options.push_back(option_1);
-    options.push_back(option_2);
-    options.push_back(option_3);
-
-    options_reordered.push_back(option_2);
-    options_reordered.push_back(option_1);
-    options_reordered.push_back(option_3);
-
-    // Serialize configs
-    let serialized_1 = serialize_dispute_config(
-        *contract_id.as_inner(), 
-        parties, 
-        options, 
-        3
-    );
-
-    let serialized_2 = serialize_dispute_config(
-        *contract_id.as_inner(), 
-        parties_reversed, 
-        options_reordered, 
-        3
-    );
-
-    assert!(serialized_1 == serialized_2);
-
-    contract_id.delete();
-
-    sui::test_scenario::end(scenario);
-}
 
 #[test]
 fun test_nivsters_take() {
