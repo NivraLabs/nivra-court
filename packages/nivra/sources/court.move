@@ -230,12 +230,6 @@ public struct BalanceWithdrawalEvent has copy, drop {
     amount_sui: u64,
 }
 
-public struct BalanceLockedEvent has copy, drop {
-    nivster: address,
-    amount_nvr: u64,
-    dispute_id: ID,
-}
-
 public struct BalanceRewardEvent has copy, drop {
     nivster: address,
     amount_nvr: u64,
@@ -319,11 +313,8 @@ public struct DisputeCompletionEvent has copy, drop {
 public struct NivsterSelectionEvent has copy, drop {
     dispute_id: ID,
     nivster: address,
-}
-
-public struct NivsterReselectionEvent has copy, drop {
-    dispute_id: ID,
-    nivster: address,
+    reselected: bool,
+    locked_amount: u64,
 }
 
 // === Public Functions ===
@@ -1280,11 +1271,6 @@ public(package) fun draw_nivsters(
         // Remove the nivster n from the worker pool to prevent duplicate selections.
         remove_from_worker_pool(self, n_addr, wp_idx);
 
-        event::emit(WorkerPoolEvent { 
-            nivster: n_addr,
-            entry: false,
-        });
-
         // Load nivster's stake.
         let nivster_stake = self.stakes.borrow_mut(n_addr);
 
@@ -1298,21 +1284,17 @@ public(package) fun draw_nivsters(
         nivster_stake.amount = nivster_stake.amount - locked_amount;
         nivster_stake.locked_amount = nivster_stake.locked_amount + locked_amount; 
 
-        event::emit(BalanceLockedEvent {
-            nivster: n_addr,
-            amount_nvr: locked_amount,
-            dispute_id,
-        });
-
         if (nivsters.contains(n_addr)) {
             // Nivster was already chosen in a previous draw, vote count is incremented by 1.
             let nivster_details = nivsters.borrow_mut(n_addr);
             nivster_details.increment_votes();
             nivster_details.increase_stake(locked_amount);
 
-            event::emit(NivsterReselectionEvent { 
+            event::emit(NivsterSelectionEvent { 
                 dispute_id, 
                 nivster: n_addr,
+                reselected: true,
+                locked_amount: locked_amount,
             });
         } else {
             nivsters.push_back(n_addr, create_voter_details(
@@ -1321,7 +1303,9 @@ public(package) fun draw_nivsters(
 
             event::emit(NivsterSelectionEvent { 
                 dispute_id, 
-                nivster: n_addr, 
+                nivster: n_addr,
+                reselected: false,
+                locked_amount: locked_amount,
             });
         };
 
