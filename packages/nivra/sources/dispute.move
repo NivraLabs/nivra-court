@@ -74,7 +74,6 @@ public struct VoterDetails has copy, drop, store {
     decrypted_vote: Option<u8>,
     decrypted_party_vote: Option<u8>,
     cap_issued: bool,
-    reward_collected: bool,
 }
 
 public struct TimeTable has copy, drop, store {
@@ -573,10 +572,6 @@ public fun stake(voter_details: &VoterDetails): u64 {
     voter_details.stake
 }
 
-public fun reward_collected(voter_details: &VoterDetails): bool {
-    voter_details.reward_collected
-}
-
 public fun decrypted_vote(voter_details: &VoterDetails): Option<u8> {
     voter_details.decrypted_vote
 }
@@ -602,10 +597,6 @@ public(package) fun total_votes_party(dispute: &Dispute): u64 {
 
 public(package) fun increment_votes(voter_details: &mut VoterDetails) {
     voter_details.votes = voter_details.votes + 1;
-}
-
-public(package) fun set_reward_collected(voter_details: &mut VoterDetails) {
-    voter_details.reward_collected = true;
 }
 
 public(package) fun increase_stake(
@@ -915,7 +906,6 @@ public(package) fun create_voter_details(stake: u64): VoterDetails {
         decrypted_vote: std::option::none(),
         decrypted_party_vote: std::option::none(),
         cap_issued: false,
-        reward_collected: false,
     }
 }
 
@@ -950,6 +940,5 @@ public(package) fun create_voter_details_test(
         decrypted_vote,
         decrypted_party_vote,
         cap_issued: false,
-        reward_collected: false,
     }
 }

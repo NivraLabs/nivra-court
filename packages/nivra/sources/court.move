@@ -909,10 +909,6 @@ public fun complete_dispute(
         winner_party
     );
 
-    let mut remaining_fees = total_dispute_fee(
-        dispute.dispute_fee(), 
-        dispute.appeals_used()
-    );
     let nivsters_take = nivsters_take(
         dispute.dispute_fee(), 
         dispute.treasury_share(), 
@@ -921,7 +917,13 @@ public fun complete_dispute(
     );
     let (penalties, majority_sum) = 
         pentalties_and_majority(dispute);
+
     let mut remaining_penalties = penalties;
+    let mut remaining_fees = total_dispute_fee(
+        dispute.dispute_fee(), 
+        dispute.appeals_used()
+    );
+    
     let (total_votes, winner_option, winner_votes) = 
         vote_params(dispute);
     let dispute_id = object::id(dispute);
