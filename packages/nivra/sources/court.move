@@ -915,17 +915,15 @@ public fun complete_dispute(
         dispute.appeals_used(), 
         dispute.init_nivster_count()
     );
-    let (penalties, majority_sum) = 
-        pentalties_and_majority(dispute);
+    let (penalties, majority_sum) = pentalties_and_majority(dispute);
 
     let mut remaining_penalties = penalties;
     let mut remaining_fees = total_dispute_fee(
         dispute.dispute_fee(), 
         dispute.appeals_used()
     );
-    
-    let (total_votes, winner_option, winner_votes) = 
-        vote_params(dispute);
+
+    let (total_votes, winner_option, winner_votes) = vote_params(dispute);
     let dispute_id = object::id(dispute);
     let party_vote = dispute.winner_option().is_none();
     let voters = dispute.voters();
@@ -948,6 +946,13 @@ public fun complete_dispute(
 
             stake.amount = stake.amount + v.stake() - penalty;
             stake.locked_amount = stake.locked_amount - v.stake();
+
+            if (stake.worker_pool_pos.is_some()) {
+                self.worker_pool.add_stake(
+                    *stake.worker_pool_pos.borrow(), 
+                    v.stake() - penalty,
+                );
+            };
 
             event::emit(BalancePenaltyEvent {
                 nivster: k,
@@ -972,6 +977,13 @@ public fun complete_dispute(
                 stake.locked_amount = stake.locked_amount - v.stake();
                 stake.reward_amount = stake.reward_amount + (sui_reward as u64);
 
+                if (stake.worker_pool_pos.is_some()) {
+                    self.worker_pool.add_stake(
+                        *stake.worker_pool_pos.borrow(), 
+                        v.stake() + nvr_reward,
+                    );
+                };
+
                 event::emit(BalanceRewardEvent {
                     nivster: k,
                     amount_nvr: (nvr_reward as u64),
@@ -990,6 +1002,13 @@ public fun complete_dispute(
 
                 stake.amount = stake.amount + v.stake() - penalty;
                 stake.locked_amount = stake.locked_amount - v.stake();
+
+                if (stake.worker_pool_pos.is_some()) {
+                    self.worker_pool.add_stake(
+                        *stake.worker_pool_pos.borrow(), 
+                        v.stake() - penalty,
+                    );
+                };
 
                 event::emit(BalancePenaltyEvent {
                     nivster: k,
