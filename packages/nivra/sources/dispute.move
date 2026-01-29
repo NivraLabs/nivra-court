@@ -33,6 +33,7 @@ use nivra::constants::{
     dispute_status_tallied,
     dispute_status_tie
 };
+use nivra::result::create_result;
 
 // === Constants ===
 const MAX_EVIDENCE_LIMIT: u64 = 3;
@@ -100,6 +101,7 @@ public struct Dispute has key {
     id: UID,
     status: u64,
     initiator: address,
+    last_payment: address,
     contract: ID,
     court: ID,
     description: String,
@@ -483,12 +485,20 @@ public fun inititator(dispute: &Dispute): address {
     dispute.initiator
 }
 
+public fun last_payment(dispute: &Dispute): address {
+    dispute.last_payment
+}
+
 public fun parties(dispute: &Dispute): vector<address> {
     dispute.parties
 }
 
 public fun result(dispute: &Dispute): vector<u64> {
     dispute.result
+}
+
+public fun party_result(dispute: &Dispute): vector<u64> {
+    dispute.party_result
 }
 
 public fun response_period_ms(dispute: &Dispute): u64 {
@@ -571,7 +581,24 @@ public fun decrypted_vote(voter_details: &VoterDetails): Option<u8> {
     voter_details.decrypted_vote
 }
 
+public fun decrypted_party_vote(voter_details: &VoterDetails): Option<u8> {
+    voter_details.decrypted_party_vote
+}
+
 // === Package Functions ===
+public(package) fun total_votes_option(dispute: &Dispute): u64 {
+    let mut total_votes = 0;
+    dispute.result.do_ref!(|count| total_votes = total_votes + *count);
+
+    total_votes
+}
+
+public(package) fun total_votes_party(dispute: &Dispute): u64 {
+    let mut total_votes = 0;
+    dispute.party_result.do_ref!(|count| total_votes = total_votes + *count);
+
+    total_votes
+}
 
 public(package) fun increment_votes(voter_details: &mut VoterDetails) {
     voter_details.votes = voter_details.votes + 1;
@@ -727,6 +754,35 @@ public(package) fun set_status(dispute: &mut Dispute, status: u64) {
     dispute.status = status;
 }
 
+public(package) fun register_payment_by_party(
+    dispute: &mut Dispute, 
+    addr: address
+) {
+    dispute.last_payment = addr;
+}
+
+public(package) fun send_results(dispute: &Dispute, ctx: &mut TxContext) {
+    let winner_party = if (dispute.winner_party.is_some()) {
+        *dispute.winner_party.borrow() as u64
+    } else {
+        dispute.parties
+            .find_index!(|addr| *addr == dispute.last_payment)
+            .extract()
+    };
+
+    dispute.parties().do!(|party| transfer::public_transfer(create_result(
+        dispute.court, 
+        object::id(dispute), 
+        dispute.contract, 
+        dispute.options, 
+        dispute.winner_option, 
+        dispute.parties(), 
+        winner_party,
+        dispute.max_appeals(), 
+        ctx
+    ), party));
+}
+
 public(package) fun create_dispute(
     initiator: address,
     contract: ID,
@@ -759,6 +815,7 @@ public(package) fun create_dispute(
         id: object::new(ctx),
         status: dispute_status_response(),
         initiator,
+        last_payment: initiator,
         contract,
         court,
         description,
