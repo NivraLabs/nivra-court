@@ -768,7 +768,6 @@ public(package) fun send_results(dispute: &Dispute, ctx: &mut TxContext) {
 }
 
 public(package) fun create_dispute(
-    initiator: address,
     contract: ID,
     court: ID,
     description: String,
@@ -797,8 +796,8 @@ public(package) fun create_dispute(
     Dispute {
         id: object::new(ctx),
         status: dispute_status_response(),
-        initiator,
-        last_payment: initiator,
+        initiator: ctx.sender(),
+        last_payment: ctx.sender(),
         contract,
         court,
         description,

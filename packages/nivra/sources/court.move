@@ -33,6 +33,7 @@ use nivra::{
         Dispute,
         PartyCap,
     },
+    utils::bytes_lt,
 };
 use std::string::String;
 use sui::{
@@ -521,7 +522,6 @@ public fun open_dispute(
 
     // NOTE: The dispute is initialized to start at response period.
     let dispute = create_dispute(
-        ctx.sender(),
         contract,
         court_id,
         description,
@@ -969,9 +969,6 @@ public fun complete_dispute(
 
 // === Admin Functions ===
 /// Creates a new court with metadata and registers it to the court registry.
-/// 
-/// Aborts if:
-/// - The caller’s admin capability is not authorized
 public fun create_court(
     court_registry: &mut CourtRegistry,
     cap: &NivraAdminCap,
@@ -1073,9 +1070,6 @@ public fun create_court(
 }
 
 /// Halts incoming operations to the court like staking, and opening disputes.
-/// 
-/// Aborts if:
-/// - The caller’s admin capability is not authorized
 public fun halt_operation(
     self: &mut Court, 
     cap: &NivraAdminCap, 
@@ -1216,9 +1210,6 @@ public fun change_key_servers(
 }
 
 /// Updates court's package versions to match the court registry.
-/// 
-/// Aborts if:
-/// - The caller’s admin capability is not authorized
 public fun update_allowed_versions(
     self: &mut Court,
     cap: &NivraAdminCap,
@@ -1349,36 +1340,6 @@ public(package) fun total_dispute_fee(dispute_fee: u64, appeal_count: u8): u64 {
     sum
 }
 
-/// Calculates the total reward amount R that treasury takes from the deposited 
-/// fees.
-/// 
-/// `R(k) = F(n)[1 + (5/8) * ((13/5)^(k+1) - (13/5))] - T(k)`
-///
-/// where:
-/// - `F(n)`: dispute fee
-/// - `k`: appeal count
-/// - `T(k)`: nivsters_take
-public(package) fun treasury_take(
-    dispute_fee: u64,
-    treasury_share: u64,
-    appeals: u8,
-    init_nivster_count: u64,
-): u64 {
-    let r = total_dispute_fee(dispute_fee, appeals);
-    let t = nivsters_take(
-        dispute_fee, 
-        treasury_share, 
-        appeals,
-        init_nivster_count,
-    );
-
-    if(t >= r) {
-        0 
-    } else {
-        r - t
-    }
-}
-
 /// Calculates the total reward amount T that nivsters take from the deposited 
 /// sui fees. Rounds up the result in favor of nivsters.
 /// 
@@ -1395,12 +1356,11 @@ public(package) fun nivsters_take(
     appeals: u8,
     init_nivster_count: u64,
 ): u64 {
-    // F(n)(1 - a) => F(n)(100 - a) / 100
     let base = std::uq64_64::from_int(dispute_fee * (100 - treasury_share))
     .div(std::uq64_64::from_int(100));
-    // 2^(k + 1)
+
     let step = std::u64::pow(2, appeals + 1);
-    // [(2^(k + 1) - 1) + (2^(k + 1) - k - 2) / N]
+
     let base_multiplier = std::uq64_64::from_int(step - 1)
     .add(
         std::uq64_64::from_int(step - (appeals as u64) - 2)
@@ -1410,7 +1370,7 @@ public(package) fun nivsters_take(
     let result = base.mul(base_multiplier);
     let result_int = result.to_int();
 
-    // Round up the result if the fractional part > 0.
+    // Ceil.
     if (result.gt(std::uq64_64::from_int(result_int))) {
         result_int + 1
     } else {
@@ -1530,23 +1490,6 @@ fun emit_dispute_creation(dispute: &Dispute) {
         public_keys: dispute.public_keys(),
         threshold: dispute.threshold(),
     });
-}
-
-fun bytes_lt(a: &vector<u8>, b: &vector<u8>): bool {
-    let min = if (a.length() < b.length()) { a.length() } else { b.length() };
-    let mut i = 0;
-
-    while (i < min) {
-        if (a[i] < b[i]) {
-            return true
-        };
-        if (a[i] > b[i]) {
-            return false
-        };
-        i = i + 1;
-    };
-
-    a.length() < b.length()
 }
 
 fun vote_params(dispute: &Dispute): (u64, u8, u64) {

@@ -35,3 +35,20 @@ public macro fun do<$K, $V>(
         i = linked_table::next($v, k);
     };
 }
+
+public fun bytes_lt(a: &vector<u8>, b: &vector<u8>): bool {
+    let min = if (a.length() < b.length()) { a.length() } else { b.length() };
+    let mut i = 0;
+
+    while (i < min) {
+        if (a[i] < b[i]) {
+            return true
+        };
+        if (a[i] > b[i]) {
+            return false
+        };
+        i = i + 1;
+    };
+
+    a.length() < b.length()
+}
