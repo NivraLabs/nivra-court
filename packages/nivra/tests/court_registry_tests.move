@@ -108,6 +108,36 @@ fun test_mint_admin_cap() {
     test_scenario::end(scenario);
 }
 
+#[test, expected_failure(abort_code = 7, location = nivra::court_registry)]
+fun test_mint_admin_cap_max() {
+    let alice = @0xA;
+
+    let mut scenario = test_scenario::begin(alice);
+    let (cr, rac) = {
+        let (mut court_registry, root_admin_cap) = 
+            get_root_privileges_for_testing(scenario.ctx());
+
+        let mut i = 0u64;
+
+        while (i <= 100u64) {
+            court_registry.mint_admin_cap(
+                &root_admin_cap, 
+                alice, 
+                scenario.ctx()
+            );
+
+            i = i + 1;
+        };
+
+        (court_registry, root_admin_cap)
+    };
+
+    rac.destroy_admin_cap_for_testing();
+    cr.destroy_court_registry_for_testing();
+
+    test_scenario::end(scenario);
+}
+
 #[test, expected_failure(abort_code = 6, location = nivra::court_registry)]
 fun test_blacklist_admin_cap() {
     let alice = @0xA;
@@ -273,6 +303,23 @@ fun test_disable_version() {
     test_scenario::end(scenario);
 }
 
+#[test, expected_failure(abort_code = 5, location = nivra::court_registry)]
+fun test_disable_unexisting_version() {
+    let alice = @0xA;
+
+    let mut scenario = test_scenario::begin(alice);
+    {
+        let (mut court_registry, root_admin_cap) = 
+            get_root_privileges_for_testing(scenario.ctx());
+
+        court_registry.disable_version(&root_admin_cap, 0);
+
+        court_registry.destroy_court_registry_for_testing();
+        root_admin_cap.destroy_admin_cap_for_testing();
+    };
+    test_scenario::end(scenario);
+}
+
 #[test]
 fun test_registeration_and_metadata() {
     let alice = @0xA;
@@ -303,6 +350,13 @@ fun test_registeration_and_metadata() {
             b"test2".to_string(), 
             b"test2".to_string(),
         );
+
+        let md = court_registry.courts().borrow(*court_placeholder.as_inner());
+
+        assert!(md.category() == b"test2".to_string());
+        assert!(md.name() == b"test2".to_string());
+        assert!(md.description() == b"test2".to_string());
+        assert!(md.skills() == b"test2".to_string());
 
         court_registry.unregister_court(*court_placeholder.as_inner());
 

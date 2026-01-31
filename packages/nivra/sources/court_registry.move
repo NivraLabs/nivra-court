@@ -362,3 +362,23 @@ public fun courts(self: &mut CourtRegistry): &mut Table<ID, CourtMetadata> {
     let self = self.load_inner_mut();
     &mut self.courts
 }
+
+#[test_only]
+public fun skills(self: &CourtMetadata): String {
+    self.skills
+}
+
+#[test_only]
+public fun category(self: &CourtMetadata): String {
+    self.category
+}
+
+#[test_only]
+public fun name(self: &CourtMetadata): String {
+    self.name
+}
+
+#[test_only]
+public fun description(self: &CourtMetadata): String {
+    self.description
+}

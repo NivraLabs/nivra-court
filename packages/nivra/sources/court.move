@@ -69,6 +69,8 @@ const MAX_NIVSTER_COUNT: u64 = 100;
 // === Errors ===
 const EWrongVersion: u64 = 1;
 const EZeroDeposit: u64 = 2;
+const EDepositUnderMinStake: u64 = 3;
+const ENotOperational: u64 = 4;
 const ENotResponsePeriod: u64 = 7;
 const EDisputeNotCompleted: u64 = 26;
 const ENoWithdrawAmount: u64 = 28;
@@ -105,20 +107,12 @@ const ENoStake: vector<u8> =
 b"Caller has no stake in the court.";
 
 #[error]
-const EDepositUnderMinStake: vector<u8> =
-b"Deposit amount is below the court's minimum required stake.";
-
-#[error]
 const ENotEnoughNVR: vector<u8> =
 b"Insufficient NVR balance to complete the withdrawal.";
 
 #[error]
 const ENotEnoughSUI: vector<u8> =
 b"Insufficient SUI balance to complete the withdrawal.";
-
-#[error]
-const ENotOperational: vector<u8> =
-b"Court operations are currently halted.";
 
 #[error]
 const ENotEnoughNivsters: vector<u8> = 
@@ -373,7 +367,6 @@ public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
 
     self.stake_pool.join(assets.into_balance());
 }
-
 
 /// Withdraws available NVR stake and/or accumulated SUI rewards from the court.
 public fun withdraw(
@@ -1600,4 +1593,112 @@ fun unlock_stake_with_rewards(
         unlocked_nvr: amount,
         dispute_id,
     });
+}
+// === Test Functions ===
+#[test_only]
+public fun create_court_for_testing(ctx: &mut TxContext): Court {
+    let inner = CourtInner {
+        allowed_versions: sui::vec_set::singleton(current_version()),
+        status: Status::Running,
+        ai_court: false,
+        init_nivster_count: 1,
+        sanction_model: FIXED_PERCENTAGE_MODEL,
+        coefficient: 15,
+        treasury_share: 15,
+        treasury_share_nvr: 15,
+        empty_vote_penalty: 5,
+        dispute_fee: 1_000_000_000,
+        min_stake: 10_000_000,
+        timetable: DefaultTimeTable {
+            default_response_period_ms: 180000,
+            default_draw_period_ms: 180000,
+            default_evidence_period_ms: 180000,
+            default_voting_period_ms: 180000,
+            default_appeal_period_ms: 180000,
+        },
+        cases: table::new(ctx),
+        stakes: linked_table::new(ctx),
+        worker_pool: worker_pool::empty(ctx),
+        stake_pool: balance::zero(),
+        reward_pool: balance::zero(),
+        key_servers: vector::empty(),
+        public_keys: vector::empty(),
+        threshold: 0,
+    };
+
+    Court { 
+        id: object::new(ctx), 
+        inner: versioned::create(
+            current_version(), 
+            inner, 
+            ctx
+        ),
+    }
+}
+
+#[test_only]
+public fun destroy_court_for_testing(court: Court) {
+    let Court {
+        id,
+        inner,
+    } = court;
+
+    id.delete();
+    let court_inner: CourtInner = inner.destroy();
+
+    let CourtInner {
+        allowed_versions: _,
+        status: _,
+        ai_court: _,
+        init_nivster_count: _,
+        sanction_model: _,
+        coefficient: _,
+        treasury_share: _,
+        treasury_share_nvr: _,
+        empty_vote_penalty: _,
+        dispute_fee: _,
+        min_stake: _,
+        timetable: _,
+        cases,
+        mut stakes,
+        worker_pool,
+        stake_pool,
+        reward_pool,
+        key_servers: _,
+        public_keys: _,
+        threshold: _,
+    } = court_inner;
+
+    cases.drop();
+
+    while (!stakes.is_empty()) {
+        stakes.pop_back();
+    };
+
+    stakes.destroy_empty();
+    worker_pool.destroy();
+    stake_pool.destroy_for_testing();
+    reward_pool.destroy_for_testing();
+}
+
+#[test_only]
+public fun stakes(court: &Court): &LinkedTable<address, Stake> {
+    let self = court.load_inner();
+    &self.stakes
+}
+
+#[test_only]
+public fun amount(stake: &Stake): u64 {
+    stake.amount
+}
+
+#[test_only]
+public fun worker_pool_pos(stake: &Stake): Option<u64> {
+    stake.worker_pool_pos
+}
+
+#[test_only]
+public fun worker_pool(court: &Court): &WorkerPool {
+    let self = court.load_inner();
+    &self.worker_pool
 }

@@ -44,8 +44,8 @@ public(package) fun empty(ctx: &mut TxContext): WorkerPool {
         length: 0,
     };
 
-    let slices: u8 = 10;
-    let mut i: u8 = 0;
+    let slices = 10u64;
+    let mut i = 0u64;
 
     while (i < slices) {
         dynamic_field::add(
