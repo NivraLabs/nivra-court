@@ -71,9 +71,12 @@ const EWrongVersion: u64 = 1;
 const EZeroDeposit: u64 = 2;
 const EDepositUnderMinStake: u64 = 3;
 const ENotOperational: u64 = 4;
-const ENotResponsePeriod: u64 = 7;
+const ENoStake: u64 = 5;
+const ENotEnoughNVR: u64 = 6;
+const ENotEnoughSUI: u64 = 7;
+const ENoWithdrawAmount: u64 = 8;
+const ENotResponsePeriod: u64 = 9;
 const EDisputeNotCompleted: u64 = 26;
-const ENoWithdrawAmount: u64 = 28;
 const EAlreadyInWorkerPool: u64 = 29;
 const ENotInWorkerPool: u64 = 30;
 const EDisputeNotCancellable: u64 = 34;
@@ -101,18 +104,6 @@ b"The dispute description must be at most 2000 bytes long.";
 #[error]
 const EDuplicateOptions: vector<u8> = 
 b"Voting options must be unique.";
-
-#[error]
-const ENoStake: vector<u8> = 
-b"Caller has no stake in the court.";
-
-#[error]
-const ENotEnoughNVR: vector<u8> =
-b"Insufficient NVR balance to complete the withdrawal.";
-
-#[error]
-const ENotEnoughSUI: vector<u8> =
-b"Insufficient SUI balance to complete the withdrawal.";
 
 #[error]
 const ENotEnoughNivsters: vector<u8> = 

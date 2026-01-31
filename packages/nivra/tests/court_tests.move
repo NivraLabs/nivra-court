@@ -176,6 +176,158 @@ fun test_staking_with_worker_pool() {
     test_scenario::end(scenario);
 }
 
+#[test, expected_failure(abort_code = 6, location = nivra::court)]
+fun test_over_withdraw_nvr() {
+    let alice = @0xA;
+    let min_stake = 10_000_000;
+
+    let mut scenario = test_scenario::begin(alice);
+    {
+        let mut court = create_court_for_testing(scenario.ctx());
+        let tokens = coin::mint_for_testing<NVR>(
+            min_stake, 
+            scenario.ctx()
+        );
+
+        court.stake(tokens, scenario.ctx());
+        let (nvr, sui) = court.
+            withdraw(min_stake + 1, 0, scenario.ctx());
+        
+        sui.destroy_zero();
+        nvr.into_balance().destroy_for_testing();
+        court.destroy_court_for_testing();
+    };
+    test_scenario::end(scenario);
+}
+
+#[test, expected_failure(abort_code = 7, location = nivra::court)]
+fun test_over_withdraw_sui() {
+    let alice = @0xA;
+    let min_stake = 10_000_000;
+
+    let mut scenario = test_scenario::begin(alice);
+    {
+        let mut court = create_court_for_testing(scenario.ctx());
+        let tokens = coin::mint_for_testing<NVR>(
+            min_stake, 
+            scenario.ctx()
+        );
+
+        court.stake(tokens, scenario.ctx());
+        let (nvr, sui) = court.
+            withdraw(min_stake, 100, scenario.ctx());
+        
+        sui.destroy_zero();
+        nvr.into_balance().destroy_for_testing();
+        court.destroy_court_for_testing();
+    };
+    test_scenario::end(scenario);
+}
+
+#[test, expected_failure(abort_code = 8, location = nivra::court)]
+fun test_withdraw_zero() {
+    let alice = @0xA;
+    let min_stake = 10_000_000;
+
+    let mut scenario = test_scenario::begin(alice);
+    {
+        let mut court = create_court_for_testing(scenario.ctx());
+        let tokens = coin::mint_for_testing<NVR>(
+            min_stake, 
+            scenario.ctx()
+        );
+
+        court.stake(tokens, scenario.ctx());
+        let (nvr, sui) = court.
+            withdraw(0, 0, scenario.ctx());
+        
+        sui.destroy_zero();
+        nvr.into_balance().destroy_for_testing();
+        court.destroy_court_for_testing();
+    };
+    test_scenario::end(scenario);
+}
+
+#[test]
+fun test_withdraw_worker_pool() {
+    let (alice, alice_stake) = (@0xA, 10_000_000);
+    let (bob, bob_stake) = (@0xB, 15_000_000);
+    let (charlie, charlie_stake) = (@0xC, 25_000_000);
+
+    let mut scenario = test_scenario::begin(alice);
+    let mut court = 
+    {
+        let mut court = create_court_for_testing(scenario.ctx());
+        court.stake(
+            coin::mint_for_testing<NVR>(
+                alice_stake, 
+                scenario.ctx()
+            ), 
+            scenario.ctx()
+        );
+        court.join_worker_pool(scenario.ctx());
+        court
+    };
+    scenario.next_tx(bob);
+    {
+        court.stake(
+            coin::mint_for_testing<NVR>(
+                bob_stake, 
+                scenario.ctx()
+            ), 
+            scenario.ctx()
+        );
+        court.join_worker_pool(scenario.ctx());
+    };
+    scenario.next_tx(charlie);
+    {
+        court.stake(
+            coin::mint_for_testing<NVR>(
+                charlie_stake, 
+                scenario.ctx()
+            ), 
+            scenario.ctx()
+        );
+        court.join_worker_pool(scenario.ctx());
+    };
+    scenario.next_tx(alice);
+    {
+        // Withdraw balance under the min stake, removing alice from the
+        // worker pool.
+        let (nvr, sui) = court.withdraw(1, 0, scenario.ctx());
+        nvr.into_balance().destroy_for_testing();
+        sui.destroy_zero();
+
+        // Check worker pool balances for charlie and bob.
+        let c_stake = court.stakes().borrow(charlie);
+        let b_stake = court.stakes().borrow(bob);
+        let worker_pool = court.worker_pool();
+        let (_, c_amount) = worker_pool
+            .get_idx(*c_stake.worker_pool_pos().borrow());
+        let (_, b_amount) = worker_pool
+            .get_idx(*b_stake.worker_pool_pos().borrow());
+
+        assert!(c_amount == charlie_stake);
+        assert!(b_amount == bob_stake);
+    };
+    scenario.next_tx(bob);
+    {
+        // Withdraw the excess stake, keeping bob in the worker pool.
+        let (nvr, sui) = court.withdraw(5_000_000, 0, scenario.ctx());
+        nvr.into_balance().destroy_for_testing();
+        sui.destroy_zero();
+
+        let b_stake = court.stakes().borrow(bob);
+        let worker_pool = court.worker_pool();
+        let (_, b_amount) = worker_pool
+            .get_idx(*b_stake.worker_pool_pos().borrow());
+
+        assert!(b_amount == bob_stake - 5_000_000);
+    };
+    test_scenario::end(scenario);
+    court.destroy_court_for_testing();
+}
+
 #[test]
 fun test_nivsters_take() {
     let dispute_fee = 10_000_000_000;
