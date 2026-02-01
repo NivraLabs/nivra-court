@@ -64,7 +64,6 @@ const MAX_APPEALS: u8 = 3;
 const MAX_DESCRIPTION_LEN: u64 = 2000;
 const MAX_OPTION_LEN: u64 = 255;
 const MAX_INIT_NIVSTERS: u64 = 11;
-const MAX_NIVSTER_COUNT: u64 = 100;
 
 // === Errors ===
 const EWrongVersion: u64 = 1;
@@ -90,6 +89,8 @@ const EInvalidPartyCap: u64 = 20;
 const ENotAppealPeriodTallied: u64 = 21;
 const ENoAppealsLeft: u64 = 22;
 const EWrongParty: u64 = 23;
+const ENotEnoughNivsters: u64 = 24;
+const EDisputeNotTie: u64 = 25;
 const EDisputeNotCompleted: u64 = 26;
 const EDisputeNotCancellable: u64 = 34;
 const EDisputeNotOneSided: u64 = 35;
@@ -101,16 +102,7 @@ const EInvalidThresholdInternal: u64 = 41;
 const EInvalidKeyConfigInternal: u64 = 42;
 const ENotDrawPeriod: u64 = 43;
 const EOptionEmpty: u64 = 44;
-const ETooManyNivsters: u64 = 46;
 const ETooHighNivsterCount: u64 = 47;
-
-#[error]
-const ENotEnoughNivsters: vector<u8> = 
-b"The court does not have enough Nivsters to process this dispute action.";
-
-#[error]
-const EDisputeNotTie: vector<u8> =
-b"Dispute outcome is not tied.";
 
 // === Structs ===
 public enum Status has copy, drop, store {
@@ -1178,10 +1170,6 @@ public(package) fun draw_nivsters(
 ) {
     let potential_nivsters: u64 = self.worker_pool.length();
     assert!(potential_nivsters >= nivster_count, ENotEnoughNivsters);
-    assert!(
-        nivsters.length() + nivster_count <= MAX_NIVSTER_COUNT, 
-        ETooManyNivsters
-    );
 
     let mut nivsters_selected = 0;
     let mut generator = new_generator(r, ctx);
