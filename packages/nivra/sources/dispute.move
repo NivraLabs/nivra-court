@@ -926,3 +926,62 @@ public(package) fun create_voter_details_test(
         cap_issued: false,
     }
 }
+
+#[test_only]
+public fun destroy_for_testing(dispute: Dispute) {
+    let Dispute {
+        id,
+        status: _,
+        initiator: _,
+        last_payment: _,
+        contract: _,
+        court: _,
+        description: _,
+        round: _,
+        timetable: _,
+        max_appeals: _,
+        appeals_used: _,
+        parties: _,
+        evidence: _,
+        mut voters,
+        options: _,
+        result: _,
+        party_result: _,
+        winner_option: _,
+        winner_party: _,
+        key_servers: _,
+        public_keys: _,
+        threshold: _,
+        serialized_config: _,
+        economic_params: _,
+    } = dispute;
+
+    id.delete();
+
+    while(!voters.is_empty()) {
+        voters.pop_back();
+    };
+
+    voters.destroy_empty();
+}
+
+#[test_only]
+public fun destroy_party_cap_for_testing(party_cap: PartyCap) {
+    let PartyCap {
+        id,
+        dispute_id: _,
+        party: _,
+    } = party_cap;
+
+    id.delete();
+}
+
+#[test_only]
+public fun set_id_for_testing(party_cap: &mut PartyCap, id: ID) {
+    party_cap.dispute_id = id;
+}
+
+#[test_only]
+public fun round_init_ms(dispute: &Dispute): u64 {
+    dispute.timetable.round_init_ms
+}

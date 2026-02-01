@@ -71,14 +71,26 @@ const EWrongVersion: u64 = 1;
 const EZeroDeposit: u64 = 2;
 const EDepositUnderMinStake: u64 = 3;
 const ENotOperational: u64 = 4;
-const ENoStake: u64 = 5;
+const EAlreadyInWorkerPool: u64 = 5;
 const ENotEnoughNVR: u64 = 6;
 const ENotEnoughSUI: u64 = 7;
 const ENoWithdrawAmount: u64 = 8;
 const ENotResponsePeriod: u64 = 9;
+const ENotInWorkerPool: u64 = 10;
+const EInvalidFee: u64 = 11;
+const EInvalidPartyCount: u64 = 12;
+const EInitiatorNotParty: u64 = 13;
+const EInvalidAppealCount: u64 = 14;
+const EDescriptionTooLong: u64 = 15;
+const EInvalidOptionsAmount: u64 = 16;
+const EDuplicateOptions: u64 = 17;
+const EOptionTooLong: u64 = 18;
+const EDisputeAlreadyExists: u64 = 19;
+const EInvalidPartyCap: u64 = 20;
+const ENotAppealPeriodTallied: u64 = 21;
+const ENoAppealsLeft: u64 = 22;
+const EWrongParty: u64 = 23;
 const EDisputeNotCompleted: u64 = 26;
-const EAlreadyInWorkerPool: u64 = 29;
-const ENotInWorkerPool: u64 = 30;
 const EDisputeNotCancellable: u64 = 34;
 const EDisputeNotOneSided: u64 = 35;
 const EInvalidTreasuryShareInternal: u64 = 36;
@@ -89,61 +101,12 @@ const EInvalidThresholdInternal: u64 = 41;
 const EInvalidKeyConfigInternal: u64 = 42;
 const ENotDrawPeriod: u64 = 43;
 const EOptionEmpty: u64 = 44;
-const EDisputeAlreadyExists: u64 = 45;
 const ETooManyNivsters: u64 = 46;
 const ETooHighNivsterCount: u64 = 47;
 
 #[error]
-const EOptionTooLong: vector<u8> =
-b"Each voting option must be at most 50 bytes long.";
-
-#[error]
-const EDescriptionTooLong: vector<u8> =
-b"The dispute description must be at most 2000 bytes long.";
-
-#[error]
-const EDuplicateOptions: vector<u8> = 
-b"Voting options must be unique.";
-
-#[error]
 const ENotEnoughNivsters: vector<u8> = 
 b"The court does not have enough Nivsters to process this dispute action.";
-
-#[error]
-const EInitiatorNotParty: vector<u8> =
-b"The caller must be a party to the dispute.";
-
-#[error]
-const EInvalidOptionsAmount: vector<u8> =
-b"The dispute must contain between 2 and 5 options.";
-
-#[error]
-const EInvalidPartyCount: vector<u8> =
-b"A dispute must involve exactly two parties.";
-
-#[error]
-const EInvalidAppealCount: vector<u8> =
-b"The maximum number of appeals in a dispute must be between 0 and 3.";
-
-#[error]
-const EInvalidFee: vector<u8> =
-b"The provided fee amount is invalid.";
-
-#[error]
-const EInvalidPartyCap: vector<u8> =
-b"The provided party capability is invalid for this dispute.";
-
-#[error]
-const ENotAppealPeriodTallied: vector<u8> =
-b"Appeals are not allowed at this stage of the dispute.";
-
-#[error]
-const ENoAppealsLeft: vector<u8> =
-b"No appeals remaining for this dispute.";
-
-#[error]
-const EWrongParty: vector<u8> =
-b"The fee must be paid by the opposing party.";
 
 #[error]
 const EDisputeNotTie: vector<u8> =
@@ -404,9 +367,6 @@ public fun withdraw(
 public fun join_worker_pool(self: &mut Court, ctx: &mut TxContext) {
     let self = self.load_inner_mut();
     let sender = ctx.sender();
-
-    assert!(self.stakes.contains(sender), ENoStake);
-
     let stake = self.stakes.borrow_mut(sender);
 
     assert!(self.status == Status::Running, ENotOperational);
@@ -543,7 +503,6 @@ public fun open_dispute(
         self.cases.add(contract, vec_map::empty());
     };
 
-    // Insert dispute details for this config (aborts if config already exists).
     self.cases
     .borrow_mut(contract)
     .insert(serialized_config, dispute_details);
@@ -563,7 +522,6 @@ public fun open_appeal(
     clock: &Clock,
 ) {
     assert!(object::id(dispute) == cap.dispute_id_party(), EInvalidPartyCap);
-    assert!(dispute.parties().contains(&cap.party()), EInvalidPartyCap);
     assert!(dispute.is_appeal_period_tallied(clock), ENotAppealPeriodTallied);
     assert!(dispute.has_appeals_left(), ENoAppealsLeft);
 
@@ -602,7 +560,6 @@ public fun accept_dispute(
 ) {
     assert!(dispute.is_response_period(clock), ENotResponsePeriod);
     assert!(object::id(dispute) == cap.dispute_id_party(), EInvalidPartyCap);
-    assert!(dispute.parties().contains(&cap.party()), EInvalidPartyCap);
     assert!(cap.party() != dispute.last_payment(), EWrongParty);
 
     let self = court.load_inner_mut();
@@ -1692,4 +1649,10 @@ public fun worker_pool_pos(stake: &Stake): Option<u64> {
 public fun worker_pool(court: &Court): &WorkerPool {
     let self = court.load_inner();
     &self.worker_pool
+}
+
+#[test_only]
+public fun dispute_fee_internal(court: &Court): u64 {
+    let self = court.load_inner();
+    self.dispute_fee
 }
