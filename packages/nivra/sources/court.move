@@ -651,8 +651,8 @@ entry fun handle_dispute_tie(
 
 /// Cancels a failed or abandoned dispute.
 public fun cancel_dispute(
-    dispute: &mut Dispute,
     court: &mut Court,
+    dispute: &mut Dispute,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
@@ -1629,6 +1629,11 @@ public fun amount(stake: &Stake): u64 {
 }
 
 #[test_only]
+public fun reward_amount(stake: &Stake): u64 {
+    stake.reward_amount
+}
+
+#[test_only]
 public fun worker_pool_pos(stake: &Stake): Option<u64> {
     stake.worker_pool_pos
 }
@@ -1643,4 +1648,16 @@ public fun worker_pool(court: &Court): &WorkerPool {
 public fun dispute_fee_internal(court: &Court): u64 {
     let self = court.load_inner();
     self.dispute_fee
+}
+
+#[test_only]
+public fun reward_pool(court: &Court): &Balance<SUI> {
+    let self = court.load_inner();
+    &self.reward_pool
+}
+
+#[test_only]
+public fun stake_pool(court: &Court): &Balance<NVR> {
+    let self = court.load_inner();
+    &self.stake_pool
 }

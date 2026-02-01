@@ -17,6 +17,7 @@ use nivra::constants::dispute_status_active;
 use sui::random::Random;
 use nivra::constants::dispute_status_draw;
 use nivra::constants::dispute_status_tie;
+use nivra::result::Result;
 
 #[test]
 fun test_staking() {
@@ -2828,6 +2829,737 @@ fun test_handle_dispute_tie_wrong_period() {
     test_scenario::end(scenario);
     court.destroy_court_for_testing();
     clock.destroy_for_testing();
+}
+
+#[test]
+fun test_cancel_dispute_no_nivsters() {
+    let alice = @0xA;
+    let bob = @0xB;
+
+    let mut scenario = test_scenario::begin(alice);
+    let mut court = 
+    {
+        let court = create_court_for_testing(scenario.ctx());
+        court
+    };
+    scenario.next_tx(alice);
+    let (mut clock, contract) = {
+        let contract_placeholder = object::new(scenario.ctx());
+        let dispute_fee = court.dispute_fee_internal();
+        let clock = clock::create_for_testing(scenario.ctx());
+
+        court.open_dispute(
+            coin::mint_for_testing<SUI>(
+                dispute_fee, 
+                scenario.ctx()
+            ), 
+            *contract_placeholder.as_inner(), 
+            "", 
+            vector[alice, bob], 
+            vector["yes", "no", "お問い合わせ"], 
+            3, 
+            &clock, 
+            scenario.ctx()
+        );
+
+        (clock, contract_placeholder)
+    };
+    scenario.create_system_objects();
+    scenario.next_tx(bob);
+    {
+        let mut dispute = scenario.take_shared<Dispute>();
+        let dispute_fee = dispute.dispute_fee();
+        let party_cap = scenario.take_from_sender<PartyCap>();
+
+        court.accept_dispute(
+            &mut dispute, 
+            coin::mint_for_testing<SUI>(
+                dispute_fee(dispute_fee, 0), 
+                scenario.ctx()
+            ), 
+            &party_cap, 
+            &clock
+        );
+
+        // skip to draw period end
+        let draw_period_end = dispute.draw_period_ms();
+
+        clock.increment_for_testing(draw_period_end + 1);
+
+        // Dispute should be now cancelable since no nivsters have been drawn.
+        court.cancel_dispute(
+            &mut dispute, 
+            &clock, 
+            scenario.ctx()
+        );
+
+        assert!(court.reward_pool().value() == 0);
+
+        // Open new dispute with same configs
+        court.open_dispute(
+            coin::mint_for_testing<SUI>(
+                dispute_fee, 
+                scenario.ctx()
+            ), 
+            *contract.as_inner(), 
+            "", 
+            vector[alice, bob], 
+            vector["yes", "no", "お問い合わせ"], 
+            3, 
+            &clock, 
+            scenario.ctx()
+        );
+
+        dispute.destroy_for_testing();
+        party_cap.destroy_party_cap_for_testing();
+    };
+    test_scenario::end(scenario);
+    court.destroy_court_for_testing();
+    clock.destroy_for_testing();
+    contract.delete();
+}
+
+#[test]
+fun test_cancel_dispute_no_votes() {
+    let alice = @0xA;
+    let bob = @0xB;
+    let charlie = @0xC;
+
+    let mut scenario = test_scenario::begin(alice);
+    let mut court = 
+    {
+        let court = create_court_for_testing(scenario.ctx());
+        court
+    };
+    scenario.next_tx(charlie);
+    {
+        court.stake(
+            coin::mint_for_testing<NVR>(
+                10_000_000, 
+                scenario.ctx()
+            ),  
+            scenario.ctx()
+        );
+        court.join_worker_pool(scenario.ctx());
+    };
+    scenario.next_tx(alice);
+    let (mut clock, contract) = {
+        let contract_placeholder = object::new(scenario.ctx());
+        let dispute_fee = court.dispute_fee_internal();
+        let clock = clock::create_for_testing(scenario.ctx());
+
+        court.open_dispute(
+            coin::mint_for_testing<SUI>(
+                dispute_fee, 
+                scenario.ctx()
+            ), 
+            *contract_placeholder.as_inner(), 
+            "", 
+            vector[alice, bob], 
+            vector["yes", "no", "お問い合わせ"], 
+            3, 
+            &clock, 
+            scenario.ctx()
+        );
+
+        (clock, contract_placeholder)
+    };
+    scenario.create_system_objects();
+    scenario.next_tx(bob);
+    {
+        let mut dispute = scenario.take_shared<Dispute>();
+        let random = scenario.take_shared<Random>();
+        let dispute_fee = dispute.dispute_fee();
+        let party_cap = scenario.take_from_sender<PartyCap>();
+
+        court.accept_dispute(
+            &mut dispute, 
+            coin::mint_for_testing<SUI>(
+                dispute_fee(dispute_fee, 0), 
+                scenario.ctx()
+            ), 
+            &party_cap, 
+            &clock
+        );
+
+        court.draw_new_nivsters(
+            &mut dispute, 
+            &clock, 
+            &random, 
+            scenario.ctx()
+        );
+
+        dispute.set_status(dispute_status_active());
+        let completed = dispute.evidence_period_ms() +
+            dispute.voting_period_ms() + dispute.appeal_period_ms();
+
+        clock.increment_for_testing(completed + 1);
+
+        // Dispute should be now cancelable since no nivsters have been drawn.
+        court.cancel_dispute(
+            &mut dispute, 
+            &clock, 
+            scenario.ctx()
+        );
+
+        assert!(court.reward_pool().value() == 0);
+        assert!(court.stakes().borrow(charlie).amount() == 10_000_000);
+
+        // Open new dispute with same configs
+        court.open_dispute(
+            coin::mint_for_testing<SUI>(
+                dispute_fee, 
+                scenario.ctx()
+            ), 
+            *contract.as_inner(), 
+            "", 
+            vector[alice, bob], 
+            vector["yes", "no", "お問い合わせ"], 
+            3, 
+            &clock, 
+            scenario.ctx()
+        );
+
+        dispute.destroy_for_testing();
+        party_cap.destroy_party_cap_for_testing();
+        test_scenario::return_shared(random);
+    };
+    test_scenario::end(scenario);
+    court.destroy_court_for_testing();
+    clock.destroy_for_testing();
+    contract.delete();
+}
+
+#[test]
+fun test_cancel_dispute_unresolved_tie() {
+    let alice = @0xA;
+    let bob = @0xB;
+    let charlie = @0xC;
+
+    let mut scenario = test_scenario::begin(alice);
+    let mut court = 
+    {
+        let court = create_court_for_testing(scenario.ctx());
+        court
+    };
+    scenario.next_tx(charlie);
+    {
+        court.stake(
+            coin::mint_for_testing<NVR>(
+                10_000_000, 
+                scenario.ctx()
+            ),  
+            scenario.ctx()
+        );
+        court.join_worker_pool(scenario.ctx());
+    };
+    scenario.next_tx(alice);
+    let (mut clock, contract) = {
+        let contract_placeholder = object::new(scenario.ctx());
+        let dispute_fee = court.dispute_fee_internal();
+        let clock = clock::create_for_testing(scenario.ctx());
+
+        court.open_dispute(
+            coin::mint_for_testing<SUI>(
+                dispute_fee, 
+                scenario.ctx()
+            ), 
+            *contract_placeholder.as_inner(), 
+            "", 
+            vector[alice, bob], 
+            vector["yes", "no", "お問い合わせ"], 
+            3, 
+            &clock, 
+            scenario.ctx()
+        );
+
+        (clock, contract_placeholder)
+    };
+    scenario.create_system_objects();
+    scenario.next_tx(bob);
+    {
+        let mut dispute = scenario.take_shared<Dispute>();
+        let random = scenario.take_shared<Random>();
+        let dispute_fee = dispute.dispute_fee();
+        let party_cap = scenario.take_from_sender<PartyCap>();
+
+        court.accept_dispute(
+            &mut dispute, 
+            coin::mint_for_testing<SUI>(
+                dispute_fee(dispute_fee, 0), 
+                scenario.ctx()
+            ), 
+            &party_cap, 
+            &clock
+        );
+
+        court.draw_new_nivsters(
+            &mut dispute, 
+            &clock, 
+            &random, 
+            scenario.ctx()
+        );
+
+        dispute.set_status(dispute_status_tie());
+        let completed = dispute.evidence_period_ms() +
+            dispute.voting_period_ms() + dispute.appeal_period_ms();
+
+        clock.increment_for_testing(completed + 1);
+
+        // Dispute should be now cancelable since no nivsters have been drawn.
+        court.cancel_dispute(
+            &mut dispute, 
+            &clock, 
+            scenario.ctx()
+        );
+
+        assert!(court.reward_pool().value() == 0);
+        assert!(court.stakes().borrow(charlie).amount() == 10_000_000);
+
+        // Open new dispute with same configs
+        court.open_dispute(
+            coin::mint_for_testing<SUI>(
+                dispute_fee, 
+                scenario.ctx()
+            ), 
+            *contract.as_inner(), 
+            "", 
+            vector[alice, bob], 
+            vector["yes", "no", "お問い合わせ"], 
+            3, 
+            &clock, 
+            scenario.ctx()
+        );
+
+        test_scenario::return_shared(random);
+        dispute.destroy_for_testing();
+        party_cap.destroy_party_cap_for_testing();
+    };
+    test_scenario::end(scenario);
+    court.destroy_court_for_testing();
+    clock.destroy_for_testing();
+    contract.delete();
+}
+
+#[test, expected_failure(abort_code = 34, location = nivra::court)]
+fun test_cancel_dispute_twice() {
+    let alice = @0xA;
+    let bob = @0xB;
+
+    let mut scenario = test_scenario::begin(alice);
+    let mut court = 
+    {
+        let court = create_court_for_testing(scenario.ctx());
+        court
+    };
+    scenario.next_tx(alice);
+    let (mut clock, contract) = {
+        let contract_placeholder = object::new(scenario.ctx());
+        let dispute_fee = court.dispute_fee_internal();
+        let clock = clock::create_for_testing(scenario.ctx());
+
+        court.open_dispute(
+            coin::mint_for_testing<SUI>(
+                dispute_fee, 
+                scenario.ctx()
+            ), 
+            *contract_placeholder.as_inner(), 
+            "", 
+            vector[alice, bob], 
+            vector["yes", "no", "お問い合わせ"], 
+            3, 
+            &clock, 
+            scenario.ctx()
+        );
+
+        (clock, contract_placeholder)
+    };
+    scenario.create_system_objects();
+    scenario.next_tx(bob);
+    {
+        let mut dispute = scenario.take_shared<Dispute>();
+        let dispute_fee = dispute.dispute_fee();
+        let party_cap = scenario.take_from_sender<PartyCap>();
+
+        court.accept_dispute(
+            &mut dispute, 
+            coin::mint_for_testing<SUI>(
+                dispute_fee(dispute_fee, 0), 
+                scenario.ctx()
+            ), 
+            &party_cap, 
+            &clock
+        );
+
+        dispute.set_status(dispute_status_active());
+        let completed = dispute.evidence_period_ms() +
+            dispute.voting_period_ms() + dispute.appeal_period_ms();
+
+        clock.increment_for_testing(completed + 1);
+
+        court.cancel_dispute(
+            &mut dispute, 
+            &clock, 
+            scenario.ctx()
+        );
+
+        court.cancel_dispute(
+            &mut dispute, 
+            &clock, 
+            scenario.ctx()
+        );
+
+        dispute.destroy_for_testing();
+        party_cap.destroy_party_cap_for_testing();
+    };
+    test_scenario::end(scenario);
+    court.destroy_court_for_testing();
+    clock.destroy_for_testing();
+    contract.delete();
+}
+
+#[test]
+fun test_resolve_one_sided_dispute_no_nivsters() {
+    let alice = @0xA;
+    let bob = @0xB;
+
+    let mut scenario = test_scenario::begin(alice);
+    let mut court = 
+    {
+        let court = create_court_for_testing(scenario.ctx());
+        court
+    };
+    scenario.next_tx(alice);
+    let (mut clock, contract) = {
+        let contract_placeholder = object::new(scenario.ctx());
+        let dispute_fee = court.dispute_fee_internal();
+        let clock = clock::create_for_testing(scenario.ctx());
+
+        court.open_dispute(
+            coin::mint_for_testing<SUI>(
+                dispute_fee, 
+                scenario.ctx()
+            ), 
+            *contract_placeholder.as_inner(), 
+            "", 
+            vector[alice, bob], 
+            vector["yes", "no", "お問い合わせ"], 
+            3, 
+            &clock, 
+            scenario.ctx()
+        );
+
+        (clock, contract_placeholder)
+    };
+    scenario.create_system_objects();
+    scenario.next_tx(bob);
+    {
+        let (cr, ac) = get_root_privileges_for_testing(scenario.ctx());
+        let mut dispute = scenario.take_shared<Dispute>();
+
+        // Skip to the end of response period.
+        clock.increment_for_testing(dispute.response_period_ms() + 1);
+
+        court.resolve_one_sided_dispute(
+            &mut dispute, 
+            &cr, 
+            &clock, 
+            scenario.ctx()
+        );
+
+        assert!(court.reward_pool().value() == 0);
+
+        dispute.destroy_for_testing();
+        cr.destroy_court_registry_for_testing();
+        ac.destroy_admin_cap_for_testing();
+    };
+    scenario.next_tx(bob);
+    {
+        let result = scenario.take_from_sender<Result>();
+
+        assert!(result.winner_party() == alice);
+        assert!(result.winner_option() == option::none());
+
+        scenario.return_to_sender(result);
+    };
+    test_scenario::end(scenario);
+    court.destroy_court_for_testing();
+    clock.destroy_for_testing();
+    contract.delete();
+}
+
+#[test]
+fun test_resolve_one_sided_dispute_appeal() {
+    let alice = @0xA;
+    let bob = @0xB;
+    let charlie = @0xC;
+
+    let mut scenario = test_scenario::begin(alice);
+    let mut court = 
+    {
+        let court = create_court_for_testing(scenario.ctx());
+        court
+    };
+    scenario.next_tx(charlie);
+    {
+        court.stake(
+            coin::mint_for_testing<NVR>(
+                10_000_000, 
+                scenario.ctx()
+            ),  
+            scenario.ctx()
+        );
+        court.join_worker_pool(scenario.ctx());
+    };
+    scenario.next_tx(alice);
+    let (mut clock, contract) = {
+        let contract_placeholder = object::new(scenario.ctx());
+        let dispute_fee = court.dispute_fee_internal();
+        let clock = clock::create_for_testing(scenario.ctx());
+
+        court.open_dispute(
+            coin::mint_for_testing<SUI>(
+                dispute_fee, 
+                scenario.ctx()
+            ), 
+            *contract_placeholder.as_inner(), 
+            "", 
+            vector[alice, bob], 
+            vector["yes", "no", "お問い合わせ"], 
+            3, 
+            &clock, 
+            scenario.ctx()
+        );
+
+        (clock, contract_placeholder)
+    };
+    scenario.create_system_objects();
+    scenario.next_tx(bob);
+    let dispute = {
+        let mut dispute = scenario.take_shared<Dispute>();
+        let random = scenario.take_shared<Random>();
+        let dispute_fee = dispute.dispute_fee();
+        let party_cap = scenario.take_from_sender<PartyCap>();
+
+        court.accept_dispute(
+            &mut dispute, 
+            coin::mint_for_testing<SUI>(
+                dispute_fee(dispute_fee, 0), 
+                scenario.ctx()
+            ), 
+            &party_cap, 
+            &clock
+        );
+
+        court.draw_new_nivsters(
+            &mut dispute, 
+            &clock, 
+            &random, 
+            scenario.ctx()
+        );
+
+        dispute.set_status(dispute_status_tallied());
+        let appeal_period = dispute.evidence_period_ms() +
+            dispute.voting_period_ms();
+
+        clock.increment_for_testing(appeal_period + 1);
+
+        court.open_appeal(
+            &mut dispute, 
+            coin::mint_for_testing<SUI>(
+                dispute_fee(dispute_fee, 1), 
+                scenario.ctx()
+            ), 
+            &party_cap, 
+            &clock
+        );
+
+        let (cr, ac) = get_root_privileges_for_testing(scenario.ctx());
+        clock.increment_for_testing(dispute.response_period_ms() + 1);
+
+        court.resolve_one_sided_dispute(
+            &mut dispute, 
+            &cr, 
+            &clock, 
+            scenario.ctx()
+        );
+
+        cr.destroy_court_registry_for_testing();
+        ac.destroy_admin_cap_for_testing();
+        test_scenario::return_shared(random);
+        party_cap.destroy_party_cap_for_testing();
+
+        dispute
+    };
+    scenario.next_tx(alice);
+    {
+        let result = scenario.take_from_sender<Result>();
+
+        assert!(result.winner_party() == bob);
+        assert!(result.winner_option() == option::none());
+
+        let charlie_stake = court.stakes().borrow(charlie);
+
+        assert!(charlie_stake.amount() == 10_000_000);
+
+        let reward = nivsters_take(
+            dispute.dispute_fee(), 
+            dispute.treasury_share(), 
+            0, 
+            dispute.init_nivster_count()
+        );
+
+        assert!(charlie_stake.reward_amount() == reward);
+        assert!(court.reward_pool().value() == reward);
+
+        scenario.return_to_sender(result);
+    };
+    test_scenario::end(scenario);
+    court.destroy_court_for_testing();
+    clock.destroy_for_testing();
+    contract.delete();
+    dispute.destroy_for_testing();
+}
+
+#[test, expected_failure(abort_code = 35, location = nivra::court)]
+fun test_resolve_one_sided_dispute_twice() {
+    let alice = @0xA;
+    let bob = @0xB;
+
+    let mut scenario = test_scenario::begin(alice);
+    let mut court = 
+    {
+        let court = create_court_for_testing(scenario.ctx());
+        court
+    };
+    scenario.next_tx(alice);
+    let (mut clock, contract) = {
+        let contract_placeholder = object::new(scenario.ctx());
+        let dispute_fee = court.dispute_fee_internal();
+        let clock = clock::create_for_testing(scenario.ctx());
+
+        court.open_dispute(
+            coin::mint_for_testing<SUI>(
+                dispute_fee, 
+                scenario.ctx()
+            ), 
+            *contract_placeholder.as_inner(), 
+            "", 
+            vector[alice, bob], 
+            vector["yes", "no", "お問い合わせ"], 
+            3, 
+            &clock, 
+            scenario.ctx()
+        );
+
+        (clock, contract_placeholder)
+    };
+    scenario.create_system_objects();
+    scenario.next_tx(bob);
+    {
+        let (cr, ac) = get_root_privileges_for_testing(scenario.ctx());
+        let mut dispute = scenario.take_shared<Dispute>();
+
+        // Skip to the end of response period.
+        clock.increment_for_testing(dispute.response_period_ms() + 1);
+
+        court.resolve_one_sided_dispute(
+            &mut dispute, 
+            &cr, 
+            &clock, 
+            scenario.ctx()
+        );
+
+        court.resolve_one_sided_dispute(
+            &mut dispute, 
+            &cr, 
+            &clock, 
+            scenario.ctx()
+        );
+
+        dispute.destroy_for_testing();
+        cr.destroy_court_registry_for_testing();
+        ac.destroy_admin_cap_for_testing();
+    };
+    test_scenario::end(scenario);
+    court.destroy_court_for_testing();
+    clock.destroy_for_testing();
+    contract.delete();
+}
+
+#[test, expected_failure(abort_code = 19, location = nivra::court)]
+fun test_resolve_one_sided_dispute_reopen_dispute() {
+    let alice = @0xA;
+    let bob = @0xB;
+
+    let mut scenario = test_scenario::begin(alice);
+    let mut court = 
+    {
+        let court = create_court_for_testing(scenario.ctx());
+        court
+    };
+    scenario.next_tx(alice);
+    let (mut clock, contract) = {
+        let contract_placeholder = object::new(scenario.ctx());
+        let dispute_fee = court.dispute_fee_internal();
+        let clock = clock::create_for_testing(scenario.ctx());
+
+        court.open_dispute(
+            coin::mint_for_testing<SUI>(
+                dispute_fee, 
+                scenario.ctx()
+            ), 
+            *contract_placeholder.as_inner(), 
+            "", 
+            vector[alice, bob], 
+            vector["yes", "no", "お問い合わせ"], 
+            3, 
+            &clock, 
+            scenario.ctx()
+        );
+
+        (clock, contract_placeholder)
+    };
+    scenario.create_system_objects();
+    scenario.next_tx(bob);
+    {
+        let (cr, ac) = get_root_privileges_for_testing(scenario.ctx());
+        let mut dispute = scenario.take_shared<Dispute>();
+
+        // Skip to the end of response period.
+        clock.increment_for_testing(dispute.response_period_ms() + 1);
+
+        court.resolve_one_sided_dispute(
+            &mut dispute, 
+            &cr, 
+            &clock, 
+            scenario.ctx()
+        );
+
+        let dispute_fee = court.dispute_fee_internal();
+
+        court.open_dispute(
+            coin::mint_for_testing<SUI>(
+                dispute_fee, 
+                scenario.ctx()
+            ), 
+            *contract.as_inner(), 
+            "", 
+            vector[alice, bob], 
+            vector["yes", "no", "お問い合わせ"], 
+            3, 
+            &clock, 
+            scenario.ctx()
+        );
+
+        dispute.destroy_for_testing();
+        cr.destroy_court_registry_for_testing();
+        ac.destroy_admin_cap_for_testing();
+    };
+    test_scenario::end(scenario);
+    court.destroy_court_for_testing();
+    clock.destroy_for_testing();
+    contract.delete();
 }
 
 #[test]
