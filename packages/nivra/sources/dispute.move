@@ -985,3 +985,33 @@ public fun set_id_for_testing(party_cap: &mut PartyCap, id: ID) {
 public fun round_init_ms(dispute: &Dispute): u64 {
     dispute.timetable.round_init_ms
 }
+
+#[test_only]
+public fun set_vote(voter_details: &mut VoterDetails, vote: Option<u8>) {
+    voter_details.decrypted_vote = vote;
+}
+
+#[test_only]
+public fun set_party_vote(voter_details: &mut VoterDetails, vote: Option<u8>) {
+    voter_details.decrypted_party_vote = vote;
+}
+
+#[test_only]
+public fun set_winner_option(dispute: &mut Dispute, option: Option<u8>) {
+    dispute.winner_option = option;
+}
+
+#[test_only]
+public fun set_winner_party(dispute: &mut Dispute, option: Option<u8>) {
+    dispute.winner_party = option;
+}
+
+#[test_only]
+public fun set_results(dispute: &mut Dispute, res: vector<u64>) {
+    dispute.result = res;
+}
+
+#[test_only]
+public fun set_party_results(dispute: &mut Dispute, res: vector<u64>) {
+    dispute.party_result = res;
+}
