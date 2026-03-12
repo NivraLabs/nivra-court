@@ -350,35 +350,3 @@ public fun destroy_court_registry_for_testing(
 public fun init_for_testing(ctx: &mut TxContext) {
     init(ctx);
 }
-
-#[test_only]
-public fun admin_whitelist(self: &CourtRegistry): VecMap<ID, u64> {
-    let self = self.load_inner();
-    self.admin_whitelist
-}
-
-#[test_only]
-public fun courts(self: &mut CourtRegistry): &mut Table<ID, CourtMetadata> {
-    let self = self.load_inner_mut();
-    &mut self.courts
-}
-
-#[test_only]
-public fun skills(self: &CourtMetadata): String {
-    self.skills
-}
-
-#[test_only]
-public fun category(self: &CourtMetadata): String {
-    self.category
-}
-
-#[test_only]
-public fun name(self: &CourtMetadata): String {
-    self.name
-}
-
-#[test_only]
-public fun description(self: &CourtMetadata): String {
-    self.description
-}
