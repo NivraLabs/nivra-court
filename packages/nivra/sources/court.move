@@ -103,6 +103,8 @@ const EInvalidKeyConfigInternal: u64 = 42;
 const ENotDrawPeriod: u64 = 43;
 const EOptionEmpty: u64 = 44;
 const ETooHighNivsterCount: u64 = 47;
+const EInvalidCoherenceReq: u64 = 48;
+const ENotEnoughRank: u64 = 49;
 
 // === Structs ===
 public enum Status has copy, drop, store {
@@ -139,6 +141,7 @@ public struct CourtInner has store {
     allowed_versions: VecSet<u64>,
     status: Status,
     ai_court: bool,
+    coherence_req: u64,
     init_nivster_count: u64,
     sanction_model: u64,
     coefficient: u64,
@@ -262,13 +265,30 @@ use fun nivra::utils::do_ref as LinkedTable.do_ref;
 
 // === Public Functions ===
 /// Adds stake to the court.
-public fun stake(self: &mut Court, assets: Coin<NVR>, ctx: &mut TxContext) {
+public fun stake(
+    self: &mut Court,
+    registry: &mut CourtRegistry,
+    assets: Coin<NVR>, 
+    ctx: &mut TxContext
+) {
     let self = self.load_inner_mut();
     let deposit_amount = assets.value();
     let sender = ctx.sender();
 
     assert!(self.status == Status::Running, ENotOperational);
     assert!(deposit_amount > 0, EZeroDeposit);
+
+    let user_stats = registry.get_user_stats(sender);
+    let c_votes = user_stats.coherent_votes();
+    let i_votes = user_stats.incoherent_votes();
+
+    let vote_ratio = if (c_votes + i_votes == 0) {
+        0
+    } else {
+        c_votes * 100 / (c_votes + i_votes)
+    };
+
+    assert!(vote_ratio >= self.coherence_req, ENotEnoughRank);
 
     if (self.stakes.contains(sender)) {
         let stake = self.stakes.borrow_mut(sender);
@@ -912,6 +932,7 @@ public fun create_court(
     court_registry: &mut CourtRegistry,
     cap: &NivraAdminCap,
     ai_court: bool,
+    coherence_req: u64,
     init_nivster_count: u64,
     category: String,
     name: String,
@@ -941,6 +962,7 @@ public fun create_court(
     assert!(sanction_model < 3, EInvalidSanctionModelInternal);
     assert!(min_stake > 0, EZeroMinStakeInternal);
     assert!(init_nivster_count <= MAX_INIT_NIVSTERS, ETooHighNivsterCount);
+    assert!(coherence_req <= 100, EInvalidCoherenceReq);
 
     // Seal limitations.
     assert!(key_servers.length() == public_keys.length(), EInvalidKeyConfigInternal);
@@ -960,6 +982,7 @@ public fun create_court(
         allowed_versions: court_registry.allowed_versions(),
         status: Status::Running,
         ai_court,
+        coherence_req,
         init_nivster_count,
         sanction_model,
         coefficient,
@@ -1041,6 +1064,18 @@ public fun change_dispute_fee(
 
     let self = self.load_inner_mut();
     self.dispute_fee = dispute_fee;
+}
+
+public fun change_coherence_req(
+    self: &mut Court, 
+    cap: &NivraAdminCap, 
+    court_registry: &CourtRegistry,
+    coherence_req: u64
+) {
+    court_registry.validate_admin_privileges(cap);
+
+    let self = self.load_inner_mut();
+    self.coherence_req = coherence_req;
 }
 
 public fun change_timetable(

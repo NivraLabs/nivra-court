@@ -99,6 +99,14 @@ public fun allowed_versions(self: &CourtRegistry): VecSet<u64> {
     self.allowed_versions
 }
 
+public fun coherent_votes(self: &UserStats): u64 {
+    self.coherent_votes
+}
+
+public fun incoherent_votes(self: &UserStats): u64 {
+    self.incoherent_votes
+}
+
 // === Admin Functions ===
 /// Validates a `NivraAdminCap` and returns its associated privilege level.
 public fun validate_admin_privileges(
@@ -244,6 +252,27 @@ public fun disable_version(
 }
 
 // === Package Functions ===
+
+public(package) fun get_user_stats(
+    self: &mut CourtRegistry,
+    key: address,
+): &UserStats {
+    if (!df::exists_(&self.id, key)) {
+        df::add(
+            &mut self.id, 
+            key, 
+            UserStats {
+                coherent_votes: 0,
+                incoherent_votes: 0,
+                rewards_sui: 0,
+                rewards_nvr: 0,
+                penalty_nvr: 0,
+            }
+        );
+    };
+
+    df::borrow(&self.id, key)
+}
 
 public(package) fun account_incoherent_vote(
     self: &mut CourtRegistry,
