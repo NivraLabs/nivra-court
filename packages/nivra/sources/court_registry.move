@@ -12,6 +12,7 @@ use sui::{
     vec_map::{Self, VecMap},
     vec_set::{Self, VecSet},
     versioned::{Self, Versioned},
+    dynamic_field as df,
 };
 
 // === Constants ===
@@ -30,6 +31,14 @@ const ETooManyAdminCaps: u64 = 7;
 // === Structs ===
 public struct NivraAdminCap has key, store {
     id: UID,
+}
+
+public struct UserStats has store {
+    coherent_votes: u64,
+    incoherent_votes: u64,
+    rewards_sui: u128,
+    rewards_nvr: u128,
+    penalty_nvr: u128,
 }
 
 public struct CourtMetadata has copy, drop, store {
@@ -235,6 +244,57 @@ public fun disable_version(
 }
 
 // === Package Functions ===
+
+public(package) fun account_incoherent_vote(
+    self: &mut CourtRegistry,
+    key: address,
+    penalty: u64,
+) {
+    if (df::exists_(&self.id, key)) {
+        let user_stats: &mut UserStats = df::borrow_mut(&mut self.id, key);
+        user_stats.incoherent_votes = user_stats.incoherent_votes + 1;
+        user_stats.penalty_nvr = user_stats.penalty_nvr + (penalty as u128);
+    } else {
+        df::add(
+            &mut self.id, 
+            key, 
+            UserStats {
+                coherent_votes: 0,
+                incoherent_votes: 1,
+                rewards_sui: 0,
+                rewards_nvr: 0,
+                penalty_nvr: penalty as u128,
+            }
+        );
+    };
+}
+
+public(package) fun account_coherent_vote(
+    self: &mut CourtRegistry,
+    key: address,
+    reward_nvr: u64,
+    reward_sui: u64,
+) {
+    if (df::exists_(&self.id, key)) {
+        let user_stats: &mut UserStats = df::borrow_mut(&mut self.id, key);
+        user_stats.coherent_votes = user_stats.coherent_votes + 1;
+        user_stats.rewards_sui = user_stats.rewards_sui + (reward_sui as u128);
+        user_stats.rewards_nvr = user_stats.rewards_nvr + (reward_nvr as u128);
+    } else {
+        df::add(
+            &mut self.id, 
+            key, 
+            UserStats {
+                coherent_votes: 1,
+                incoherent_votes: 0,
+                rewards_sui: reward_sui as u128,
+                rewards_nvr: reward_nvr as u128,
+                penalty_nvr: 0,
+            }
+        );
+    };
+}
+
 /// Registers a new court in the court registry. 
 public(package) fun register_court(
     self: &mut CourtRegistry, 

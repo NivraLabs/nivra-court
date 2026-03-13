@@ -653,6 +653,7 @@ entry fun handle_dispute_tie(
 public fun cancel_dispute(
     court: &mut Court,
     dispute: &mut Dispute,
+    court_registry: &mut CourtRegistry,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
@@ -685,7 +686,8 @@ public fun cancel_dispute(
 
     dispute.voters().do_ref!(|k, v| {
         unlock_stake_with_penalty(
-            self, 
+            self,
+            court_registry,
             k, 
             v.stake(), 
             0, 
@@ -706,7 +708,7 @@ public fun cancel_dispute(
 public fun resolve_one_sided_dispute(
     court: &mut Court,
     dispute: &mut Dispute,
-    court_registry: &CourtRegistry,
+    court_registry: &mut CourtRegistry,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
@@ -758,7 +760,8 @@ public fun resolve_one_sided_dispute(
         remaining_fees = remaining_fees - (reward as u64);
 
         unlock_stake_with_rewards(
-            self, 
+            self,
+            court_registry,
             k, 
             v.stake(), 
             0, 
@@ -787,7 +790,7 @@ public fun resolve_one_sided_dispute(
 public fun complete_dispute(
     court: &mut Court,
     dispute: &mut Dispute,
-    court_registry: &CourtRegistry,
+    court_registry: &mut CourtRegistry,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
@@ -836,7 +839,8 @@ public fun complete_dispute(
 
         if (decrypted_vote.is_none()) {
             unlock_stake_with_penalty(
-                self, 
+                self,
+                court_registry,
                 k, 
                 v.stake(), 
                 v.stake() * dispute.empty_vote_penalty() / 100, 
@@ -856,7 +860,8 @@ public fun complete_dispute(
                 remaining_penalties = remaining_penalties - (nvr_reward as u64);
 
                 unlock_stake_with_rewards(
-                    self, 
+                    self,
+                    court_registry,
                     k, 
                     v.stake(), 
                     (nvr_reward as u64), 
@@ -865,7 +870,8 @@ public fun complete_dispute(
                 );
             } else {
                 unlock_stake_with_penalty(
-                    self, 
+                    self,
+                    court_registry,
                     k, 
                     v.stake(), 
                     penalty(
@@ -1475,7 +1481,8 @@ fun pentalties_and_majority(dispute: &Dispute): (u64, u64) {
 }
 
 fun unlock_stake_with_penalty(
-    self: &mut CourtInner, 
+    self: &mut CourtInner,
+    registry: &mut CourtRegistry,
     key: address, 
     amount: u64,
     penalty: u64,
@@ -1493,6 +1500,8 @@ fun unlock_stake_with_penalty(
         );
     };
 
+    registry.account_incoherent_vote(key, penalty);
+
     event::emit(BalancePenaltyEvent {
         nivster: key,
         amount_nvr: penalty,
@@ -1503,6 +1512,7 @@ fun unlock_stake_with_penalty(
 
 fun unlock_stake_with_rewards(
     self: &mut CourtInner, 
+    registry: &mut CourtRegistry,
     key: address, 
     amount: u64,
     reward_nvr: u64,
@@ -1521,6 +1531,8 @@ fun unlock_stake_with_rewards(
             amount + reward_nvr,
         );
     };
+
+    registry.account_coherent_vote(key, reward_nvr, reward_sui);
 
     event::emit(BalanceRewardEvent {
         nivster: key,
