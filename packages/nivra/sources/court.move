@@ -267,7 +267,7 @@ use fun nivra::utils::do_ref as LinkedTable.do_ref;
 /// Adds stake to the court.
 public fun stake(
     self: &mut Court,
-    registry: &mut CourtRegistry,
+    registry: &CourtRegistry,
     assets: Coin<NVR>, 
     ctx: &mut TxContext
 ) {
@@ -278,17 +278,14 @@ public fun stake(
     assert!(self.status == Status::Running, ENotOperational);
     assert!(deposit_amount > 0, EZeroDeposit);
 
-    let user_stats = registry.get_user_stats(sender);
-    let c_votes = user_stats.coherent_votes();
-    let i_votes = user_stats.incoherent_votes();
+    if (self.coherence_req > 0) {
+        let user_stats = registry.get_user_stats(sender);
+        let c_votes = user_stats.coherent_votes();
+        let i_votes = user_stats.incoherent_votes();
+        let vote_ratio = c_votes * 100 / (c_votes + i_votes);
 
-    let vote_ratio = if (c_votes + i_votes == 0) {
-        0
-    } else {
-        c_votes * 100 / (c_votes + i_votes)
+        assert!(vote_ratio >= self.coherence_req, ENotEnoughRank);
     };
-
-    assert!(vote_ratio >= self.coherence_req, ENotEnoughRank);
 
     if (self.stakes.contains(sender)) {
         let stake = self.stakes.borrow_mut(sender);

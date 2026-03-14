@@ -254,23 +254,9 @@ public fun disable_version(
 // === Package Functions ===
 
 public(package) fun get_user_stats(
-    self: &mut CourtRegistry,
+    self: &CourtRegistry,
     key: address,
 ): &UserStats {
-    if (!df::exists_(&self.id, key)) {
-        df::add(
-            &mut self.id, 
-            key, 
-            UserStats {
-                coherent_votes: 0,
-                incoherent_votes: 0,
-                rewards_sui: 0,
-                rewards_nvr: 0,
-                penalty_nvr: 0,
-            }
-        );
-    };
-
     df::borrow(&self.id, key)
 }
 
