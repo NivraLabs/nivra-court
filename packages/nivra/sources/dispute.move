@@ -28,7 +28,6 @@ use nivra::constants::dispute_status_cancelled;
 use nivra::constants::dispute_refund;
 use nivra::constants::dispute_status_completed_one_sided;
 use nivra::constants::dispute_status_completed;
-use nivra::registry::Registry;
 
 // === Constants ===
 // Dispute cancellation reasons.
@@ -198,14 +197,11 @@ use fun nivra::vec_map::unique_values as VecMap.unique_values;
 // === Public Functions ===
 public fun finalize_vote(
     dispute: &mut Dispute,
-    registry: &Registry,
     package_id: address,
     derived_keys: &vector<vector<u8>>,
     key_servers: &vector<address>,
     clock: &Clock,
 ) {
-    registry.validate_version();
-
     assert!(
         dispute.is_appeal_period_untallied(clock), 
         ENotAppealPeriodUntallied
@@ -307,13 +303,10 @@ public fun finalize_vote(
 
 public fun cast_vote(
     dispute: &mut Dispute,
-    registry: &Registry,
     encrypted_vote: vector<u8>,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
-    registry.validate_version();
-
     assert!(dispute.is_voting_period(clock), ENotVotingPeriod);
 
     let voter_idx = dispute.voters.get_idx_opt(&ctx.sender());
