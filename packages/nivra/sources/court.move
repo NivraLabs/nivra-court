@@ -8,6 +8,7 @@ use sui::table::{Self, Table};
 use sui::linked_table::{Self, LinkedTable};
 use nivra::worker_pool::{Self, WorkerPool};
 use sui::balance::{Self, Balance};
+use sui::vec_set::VecSet;
 use token::nvr::NVR;
 use sui::sui::SUI;
 use sui::coin::Coin;
@@ -39,6 +40,7 @@ use nivra::vec_map_unsafe::{Self, VecMapUnsafe};
 use nivra::dispute::VoterDetails;
 use nivra::constants::max_init_nivster_count;
 use nivra::constants::max_voter_count;
+use nivra::constants::current_version;
 
 // === Constants ===
 // Sanction models
@@ -94,10 +96,12 @@ const EInvalidStatus: u64 = 49;
 const EDisputeNotCompleted: u64 = 50;
 const ETooHighInitNivsterCount: u64 = 51;
 const ETooManyVoters: u64 = 52;
+const EWrongVersion: u64 = 53;
 
 // === Structs ===
 public struct Court has key, store {
     id: UID,
+    allowed_versions: VecSet<u64>,
     cases: Table<vector<u8>, ID>,
     metadata: Metadata,
     timetable: Timetable,
@@ -240,7 +244,7 @@ public fun stake(
     assets: Coin<NVR>, 
     ctx: &mut TxContext,
 ) {
-    registry.validate_version();
+    court.validate_version();
     assert!(court.operation.status == status_active(), ENotOperational);
 
     let nivster_reputation = registry.nivster_reputation(ctx.sender());
@@ -293,12 +297,11 @@ public fun stake(
 /// Withdraws available NVR stake and/or accumulated SUI rewards from the court.
 public fun withdraw(
     court: &mut Court,
-    registry: &Registry,
     amount_nvr: u64,
     amount_sui: u64,
     ctx: &mut TxContext,
 ): (Coin<NVR>, Coin<SUI>) {
-    registry.validate_version();
+    court.validate_version();
     let stake = court.stakes.borrow_mut(ctx.sender());
 
     assert!(stake.amount >= amount_nvr, ENotEnoughNVR);
@@ -335,10 +338,9 @@ public fun withdraw(
 /// Enrolls the caller into the worker pool.
 public fun join_worker_pool(
     court: &mut Court, 
-    registry: &Registry,
     ctx: &mut TxContext
 ) {
-    registry.validate_version();
+    court.validate_version();
     assert!(court.operation.status == status_active(), ENotOperational);
 
     let stake = court.stakes.borrow_mut(ctx.sender());
@@ -358,10 +360,9 @@ public fun join_worker_pool(
 /// Removes the caller from the worker pool.
 public fun leave_worker_pool(
     court: &mut Court,
-    registry: &Registry,
     ctx: &mut TxContext
 ) {
-    registry.validate_version();
+    court.validate_version();
 
     let stake = court.stakes.borrow_mut(ctx.sender());
     assert!(stake.worker_pool_pos.is_some(), ENotInWorkerPool);
@@ -381,7 +382,6 @@ public fun leave_worker_pool(
 
 public fun open_dispute(
     court: &mut Court,
-    registry: &Registry,
     fee: Coin<SUI>,
     contract: ID,
     description: String,
@@ -391,8 +391,7 @@ public fun open_dispute(
     clock: &Clock, 
     ctx: &mut TxContext
 ) {
-    registry.validate_version();
-
+    court.validate_version();
     assert!(court.operation.status == status_active(), ENotOperational);
     assert!(court.economics.dispute_fee == fee.value(), EInvalidFee);
 
@@ -451,13 +450,11 @@ public fun open_dispute(
 public fun accept_dispute(
     court: &mut Court,
     dispute: &mut Dispute,
-    registry: &Registry,
     fee: Coin<SUI>,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
-    registry.validate_version();
-
+    court.validate_version();
     assert!(dispute.is_response_period(clock), ENotResponsePeriod);
     assert!(dispute.court() == object::id(court), EInvalidCourt);
     assert!(dispute.is_party(ctx.sender()), ENotDisputeParty);
@@ -477,13 +474,11 @@ public fun accept_dispute(
 entry fun draw_nivsters(
     court: &mut Court,
     dispute: &mut Dispute,
-    registry: &Registry,
     clock: &Clock,
     r: &Random,
     ctx: &mut TxContext,
 ) {
-    registry.validate_version();
-
+    court.validate_version();
     assert!(dispute.court() == object::id(court), EInvalidCourt);
     assert!(dispute.is_draw_period(clock), ENotDrawPeriod);
 
@@ -511,13 +506,11 @@ entry fun draw_nivsters(
 public fun open_appeal(
     court: &mut Court,
     dispute: &mut Dispute,
-    registry: &Registry,
     fee: Coin<SUI>,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
-    registry.validate_version();
-
+    court.validate_version();
     assert!(dispute.court() == object::id(court), EInvalidCourt);
     assert!(dispute.is_appeal_period_tallied(clock), ENotAppealPeriodTallied);
     assert!(dispute.is_party(ctx.sender()), ENotDisputeParty);
@@ -538,13 +531,11 @@ public fun open_appeal(
 entry fun handle_dispute_tie(
     court: &mut Court,
     dispute: &mut Dispute,
-    registry: &Registry,
     clock: &Clock,
     r: &Random,
     ctx: &mut TxContext,
 ) {
-    registry.validate_version();
-
+    court.validate_version();
     assert!(dispute.court() == object::id(court), EInvalidCourt);
     assert!(dispute.is_appeal_period_tie(clock), EDisputeNotTie);
 
@@ -562,11 +553,10 @@ entry fun handle_dispute_tie(
 public fun cancel_dispute(
     court: &mut Court,
     dispute: &mut Dispute,
-    registry: &Registry,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
-    registry.validate_version();
+    court.validate_version();
     assert!(dispute.court() == object::id(court), EInvalidCourt);
     assert!(dispute.is_incomplete(clock), EDisputeNotCancellable);
 
@@ -609,7 +599,7 @@ public fun resolve_one_sided_dispute(
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
-    registry.validate_version();
+    court.validate_version();
     assert!(dispute.court() == object::id(court), EInvalidCourt);
     assert!(dispute.party_failed_payment(clock), EDisputeNotOneSided);
 
@@ -749,7 +739,7 @@ public fun complete_dispute(
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
-    registry.validate_version();
+    court.validate_version();
     assert!(dispute.court() == object::id(court), EInvalidCourt);
     assert!(dispute.is_completed(clock), EDisputeNotCompleted);
 
@@ -880,6 +870,13 @@ public fun complete_dispute(
     };
 
     dispute.complete_dispute(ctx);
+}
+
+public fun validate_version(court: &Court) {
+    assert!(
+        court.allowed_versions.contains(&current_version()), 
+        EWrongVersion
+    );
 }
 
 public fun create_metadata(
@@ -1023,6 +1020,7 @@ public fun create_court(
 
     let court = Court {
         id: object::new(ctx),
+        allowed_versions: registry.allowed_versions(),
         cases: table::new(ctx),
         metadata,
         timetable,
@@ -1049,11 +1047,11 @@ public fun create_court(
 
 public fun change_metadata(
     court: &mut Court,
-    registry: &mut Registry,
+    registry: &Registry,
     metadata: Metadata,
     ctx: &mut TxContext,
 ) {
-    registry.validate_version();
+    court.validate_version();
     registry.validate_admin_privileges(ctx);
 
     court.metadata = metadata;
@@ -1066,11 +1064,11 @@ public fun change_metadata(
 
 public fun change_timetable(
     court: &mut Court,
-    registry: &mut Registry,
+    registry: &Registry,
     timetable: Timetable,
     ctx: &mut TxContext,
 ) {
-    registry.validate_version();
+    court.validate_version();
     registry.validate_admin_privileges(ctx);
 
     court.timetable = timetable;
@@ -1083,11 +1081,11 @@ public fun change_timetable(
 
 public fun change_economics(
     court: &mut Court,
-    registry: &mut Registry,
+    registry: &Registry,
     economics: Economics,
     ctx: &mut TxContext,
 ) {
-    registry.validate_version();
+    court.validate_version();
     registry.validate_admin_privileges(ctx);
 
     court.economics = economics;
@@ -1100,11 +1098,11 @@ public fun change_economics(
 
 public fun change_operation(
     court: &mut Court,
-    registry: &mut Registry,
+    registry: &Registry,
     operation: Operation,
     ctx: &mut TxContext,
 ) {
-    registry.validate_version();
+    court.validate_version();
     registry.validate_admin_privileges(ctx);
 
     court.operation = operation;
@@ -1113,6 +1111,15 @@ public fun change_operation(
         court: object::id(court), 
         operation, 
     });
+}
+
+public fun migrate(
+    court: &mut Court,
+    registry: &Registry,
+    ctx: &mut TxContext,
+) {
+    registry.validate_admin_privileges(ctx);
+    court.allowed_versions = registry.allowed_versions();
 }
 
 // === Package Functions ===
