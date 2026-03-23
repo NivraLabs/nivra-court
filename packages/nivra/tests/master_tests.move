@@ -747,3 +747,129 @@ fun test_dispute_appeal_completion() {
     clock.destroy_for_testing();
     scenario.end();
 }
+
+// --- 13. Dispute reward distribution ---
+
+#[test]
+fun test_dispute_reward_distribution() {
+    let mut scenario = setup_registry();
+    setup_court(&mut scenario, 3); // court needs 3, 3 stakes
+
+    stake_nvr(&mut scenario, NIVSTER_1, MIN_STAKE);
+    stake_nvr(&mut scenario, NIVSTER_2, MIN_STAKE);
+    stake_nvr(&mut scenario, NIVSTER_3, MIN_STAKE);
+
+    let mut clock = clock::create_for_testing(scenario.ctx());
+    open_dispute(&mut scenario, &clock);
+    accept_dispute(&mut scenario, &clock);
+
+    scenario.next_tx(@0x0);
+    random::create_for_testing(scenario.ctx());
+    draw_nivsters(&mut scenario, &clock);
+
+    // Skip past evidence phase to enter voting phase
+    clock.increment_for_testing(EVIDENCE_MS + 1);
+
+    // Inject fake decrypted votes directly
+    scenario.next_tx(ADMIN);
+    {
+        let mut dispute = scenario.take_shared<Dispute>();
+        
+        let nivsters = dispute::voters(&dispute).keys();
+        assert!(nivsters.length() == 3, 0);
+
+        // Option 0 (Option A) gets 2 votes, Option 1 (Option B) gets 1 vote.
+        dispute::add_fake_vote_for_testing(&mut dispute, NIVSTER_1, 0);
+        dispute::add_fake_vote_for_testing(&mut dispute, NIVSTER_2, 0);
+        dispute::add_fake_vote_for_testing(&mut dispute, NIVSTER_3, 1);
+        
+        dispute::tally_fake_votes_for_testing(&mut dispute);
+
+        assert!(dispute::status(&dispute) == constants::dispute_status_tallied(), 1);
+
+        test_scenario::return_shared(dispute);
+    };
+
+    // Skip past voting phase AND appeal phase to complete the dispute
+    clock.increment_for_testing(VOTING_MS + APPEAL_MS + 1);
+
+    scenario.next_tx(PARTY_A);
+    {
+        let mut court = scenario.take_shared<Court>();
+        let mut dispute = scenario.take_shared<Dispute>();
+        let mut registry = scenario.take_shared<Registry>();
+
+        court::complete_dispute(
+            &mut court,
+            &mut dispute,
+            &mut registry,
+            &clock,
+            scenario.ctx(),
+        );
+
+        test_scenario::return_shared(registry);
+        test_scenario::return_shared(dispute);
+        test_scenario::return_shared(court);
+    };
+
+    // Check PARTY_A balance (should be exactly 1000 SUI dispute fee returned)
+    scenario.next_tx(PARTY_A);
+    {
+        let sui_coin = scenario.take_from_address<Coin<SUI>>(PARTY_A);
+        assert!(sui_coin.value() == 1000, 2);
+        sui_coin.into_balance().destroy_for_testing();
+    };
+
+    // Check Treasury balance (10% of 1000 SUI = 100 SUI, 10% of 50 NVR = 5 NVR + 1 rounding remainder = 6 NVR)
+    // The treasury address is the module publisher's address returned by registry::treasury_address(), 
+    // which in test environments typically defaults to ADMIN.
+    scenario.next_tx(ADMIN);
+    {
+        let sui_coin = scenario.take_from_address<Coin<SUI>>(ADMIN);
+        assert!(sui_coin.value() == 100, 3);
+        sui_coin.into_balance().destroy_for_testing();
+
+        let nvr_coin = scenario.take_from_address<Coin<NVR>>(ADMIN);
+        assert!(nvr_coin.value() == 6, 4);
+        nvr_coin.into_balance().destroy_for_testing();
+    };
+
+    // Check NIVSTER_1 balance (should be 522 NVR, 450 SUI)
+    scenario.next_tx(NIVSTER_1);
+    {
+        let mut court = scenario.take_shared<Court>();
+        let (nvr, sui) = court::withdraw(&mut court, 522, 450, scenario.ctx());
+        assert!(nvr.value() == 522, 5);
+        assert!(sui.value() == 450, 6);
+        nvr.into_balance().destroy_for_testing();
+        sui.into_balance().destroy_for_testing();
+        test_scenario::return_shared(court);
+    };
+
+    // Check NIVSTER_2 balance (should be 522 NVR, 450 SUI)
+    scenario.next_tx(NIVSTER_2);
+    {
+        let mut court = scenario.take_shared<Court>();
+        let (nvr, sui) = court::withdraw(&mut court, 522, 450, scenario.ctx());
+        assert!(nvr.value() == 522, 7);
+        assert!(sui.value() == 450, 8);
+        nvr.into_balance().destroy_for_testing();
+        sui.into_balance().destroy_for_testing();
+        test_scenario::return_shared(court);
+    };
+
+    // Check NIVSTER_3 balance (should be 450 NVR, 0 SUI since they lost 50 NVR)
+    scenario.next_tx(NIVSTER_3);
+    {
+        let mut court = scenario.take_shared<Court>();
+        let (nvr, sui) = court::withdraw(&mut court, 450, 0, scenario.ctx());
+        assert!(nvr.value() == 450, 9);
+        assert!(sui.value() == 0, 10);
+        nvr.into_balance().destroy_for_testing();
+        sui.into_balance().destroy_for_testing();
+        test_scenario::return_shared(court);
+    };
+
+    clock.destroy_for_testing();
+    scenario.end();
+}
