@@ -5,4 +5,4 @@ edition = "2024.beta"
 [dependencies]
 
 [addresses]
-token = "0x0"
+token = "0xcd2a144d6b9f1bc7c7367641f36021649f2d9fc15b758c332ec409e5b3edd47a"
