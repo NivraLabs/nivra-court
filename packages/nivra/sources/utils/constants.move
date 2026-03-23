@@ -39,6 +39,7 @@ const MAX_PARTY_SIZE: u64 = 2;
 const MAX_DISPUTE_DESCRIPTION_LENGTH: u64 = 2000;
 const MAX_EVIDENCE_PER_PARTY: u64 = 3;
 const TIE_NIVSTER_COUNT: u64 = 1;
+const MAX_VOTER_COUNT: u64 = 100;
 
 // Court rules.
 const MAX_NAME_LENGTH: u64 = 255;
@@ -46,6 +47,7 @@ const MAX_CATEGORY_LENGTH: u64 = 255;
 const MAX_DESCRIPTION_LENGTH: u64 = 2000;
 const STATUS_ACTIVE: u8 = 0;
 const STATUS_HALTED: u8 = 1;
+const MAX_INIT_NIVSTER_COUNT: u64 = 11;
 
 // Evidence rules.
 const MAX_EVIDENCE_DESCRIPTION_LENGTH: u64 = 2000;
@@ -210,4 +212,13 @@ public fun min_vote_decay_ms(): u64 {
 /// Amount of solved cases before reputation starts counting.
 public fun reputation_threshold(): u64 {
     REPUTATION_THRESHOLD
+}
+
+/// Maximum amount of nivsters allowed in a single dispute.
+public fun max_voter_count(): u64 {
+    MAX_VOTER_COUNT
+}
+
+public fun max_init_nivster_count(): u64 {
+    MAX_INIT_NIVSTER_COUNT
 }

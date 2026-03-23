@@ -37,6 +37,8 @@ use nivra::constants::status_active;
 use nivra::constants::status_halted;
 use nivra::vec_map_unsafe::{Self, VecMapUnsafe};
 use nivra::dispute::VoterDetails;
+use nivra::constants::max_init_nivster_count;
+use nivra::constants::max_voter_count;
 
 // === Constants ===
 // Sanction models
@@ -90,6 +92,8 @@ const EDisputeNotCancellable: u64 = 45;
 const EDisputeNotOneSided: u64 = 46;
 const EInvalidStatus: u64 = 49;
 const EDisputeNotCompleted: u64 = 50;
+const ETooHighInitNivsterCount: u64 = 51;
+const ETooManyVoters: u64 = 52;
 
 // === Structs ===
 public struct Court has key, store {
@@ -939,6 +943,10 @@ public fun create_economics(
 ): Economics {
     assert!(min_stake > 0, EZeroMinStake);
     assert!(init_nivster_count > 0, EZeroInitNivsters);
+    assert!(
+        init_nivster_count <= max_init_nivster_count(), 
+        ETooHighInitNivsterCount
+    );
     assert!(sanction_model < 3, EInvalidSanctionModel);
     assert!(reputation_requirement <= 100, EInvalidReputationRequirement);
     assert!(coefficient <= 100, EInvalidCoefficient);
@@ -1164,6 +1172,10 @@ fun random_nivster_selection(
     ctx: &mut TxContext,
 ) {
     assert!(court.worker_pool.length() >= nivster_count, ENotEnoughNivsters);
+    assert!(
+        dispute.voters().length() + nivster_count <= max_voter_count(),
+        ETooManyVoters
+    );
 
     let mut nivsters_selected: vector<address> = vector[];
     let mut generator = new_generator(r, ctx);
