@@ -883,7 +883,7 @@ fun test_large_dispute() {
 
     let mut i = 0;
 
-    while (i < 100) {
+    while (i < 160) {
         stake_nvr(&mut scenario, sui::address::from_u256(1000 + i), 10 * MIN_STAKE);
         i = i + 1;
     };
