@@ -4,7 +4,4 @@ edition = "2024.beta"
 
 [dependencies]
 seal = { git = "https://github.com/MystenLabs/seal.git", subdir = "move/seal", rev = "seal-v0.5.12" }
-token = { local = "../token" }
-
-[addresses]
-nivra = "0x0"
+nvr = { local = "../nvr" }
