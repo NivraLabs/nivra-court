@@ -517,3 +517,75 @@ fun test_multiple_nivsters_drawn() {
     clock.destroy_for_testing();
     scenario.end();
 }
+
+// --- 11. Full dispute to completion ---
+
+#[test]
+fun test_dispute_completion() {
+    let mut scenario = setup_registry();
+    setup_court(&mut scenario, 3); // court needs 3, 3 stakes
+
+    stake_nvr(&mut scenario, NIVSTER_1, MIN_STAKE);
+    stake_nvr(&mut scenario, NIVSTER_2, MIN_STAKE);
+    stake_nvr(&mut scenario, NIVSTER_3, MIN_STAKE);
+
+    let mut clock = clock::create_for_testing(scenario.ctx());
+    open_dispute(&mut scenario, &clock);
+    accept_dispute(&mut scenario, &clock);
+
+    scenario.next_tx(@0x0);
+    random::create_for_testing(scenario.ctx());
+
+    draw_nivsters(&mut scenario, &clock);
+
+    // Skip to voting/tally phase
+    clock.increment_for_testing(EVIDENCE_MS + 1);
+
+    // Inject fake decrypted votes directly
+    scenario.next_tx(ADMIN);
+    {
+        let mut dispute = scenario.take_shared<Dispute>();
+        
+        // Option 0 (Option A) gets 2 votes, Option 1 (Option B) gets 1 vote.
+        dispute::add_fake_vote_for_testing(&mut dispute, NIVSTER_1, 0);
+        dispute::add_fake_vote_for_testing(&mut dispute, NIVSTER_2, 0);
+        dispute::add_fake_vote_for_testing(&mut dispute, NIVSTER_3, 1);
+        
+        dispute::tally_fake_votes_for_testing(&mut dispute);
+
+        assert!(
+            dispute::status(&dispute) == constants::dispute_status_tallied()
+        );
+
+        test_scenario::return_shared(dispute);
+    };
+
+    // Skip to appeal period end
+    clock.increment_for_testing(VOTING_MS + APPEAL_MS + 1);
+
+    scenario.next_tx(PARTY_A);
+    {
+        let mut court = scenario.take_shared<Court>();
+        let mut dispute = scenario.take_shared<Dispute>();
+        let mut registry = scenario.take_shared<Registry>();
+
+        court::complete_dispute(
+            &mut court,
+            &mut dispute,
+            &mut registry,
+            &clock,
+            scenario.ctx(),
+        );
+
+        assert!(
+            dispute::status(&dispute) == constants::dispute_status_completed()
+        );
+
+        test_scenario::return_shared(registry);
+        test_scenario::return_shared(dispute);
+        test_scenario::return_shared(court);
+    };
+
+    clock.destroy_for_testing();
+    scenario.end();
+}

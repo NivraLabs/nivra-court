@@ -1043,3 +1043,54 @@ public(package) fun complete_dispute(
         winner_option: *winner_option.borrow(),
     });
 }
+
+// === Test Functions ===
+#[test_only]
+public fun add_fake_vote_for_testing(
+    dispute: &mut Dispute, 
+    nivster: address, 
+    vote_option: u8
+) {
+    let idx = *dispute.voters.get_idx_opt(&nivster).borrow();
+    let voter_details = dispute.voters.get_value_by_idx_mut(idx);
+    voter_details.decrypted_vote = option::some(vote_option);
+}
+
+#[test_only]
+public fun tally_fake_votes_for_testing(dispute: &mut Dispute) {
+    let mut result = vector::tabulate!(dispute.options.length(), |_| 0);
+
+    dispute.voters.for_each!(|_, v| {
+        v.decrypted_vote.do_ref!(|decrypted| {
+            let opt = *decrypted;
+            if (opt as u64 < dispute.options.length()) {
+                *&mut result[opt as u64] = result[opt as u64] + v.votes;
+            };
+        });
+    });
+
+    let mut highest_opt = 0;
+    let mut second_highest_opt = 0;
+
+    dispute.result = result;
+    dispute.result.do!(|vote_count| {
+        if (vote_count > highest_opt) {
+            second_highest_opt = highest_opt;
+            highest_opt = vote_count;
+        } else if (vote_count > second_highest_opt) {
+            second_highest_opt = vote_count;
+        };
+    });
+    
+    let winner_option_idx = if (highest_opt > 0 && second_highest_opt == highest_opt) {
+        dispute.status = dispute_status_tie();
+        option::none()
+    } else {
+        dispute.status = dispute_status_tallied();
+        dispute
+            .result
+            .find_index!(|count| count == highest_opt)
+    };
+
+    dispute.winner_option = winner_option_idx;
+}
