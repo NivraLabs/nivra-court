@@ -10,7 +10,7 @@ use sui::{
     table::{Self, Table},
     clock::Clock
 };
-use token::nvr::NVR;
+use nvr::nvr::NVR;
 
 // === Errors ===
 

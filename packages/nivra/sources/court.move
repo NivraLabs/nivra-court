@@ -9,7 +9,7 @@ use sui::linked_table::{Self, LinkedTable};
 use nivra::worker_pool::{Self, WorkerPool};
 use sui::balance::{Self, Balance};
 use sui::vec_set::VecSet;
-use token::nvr::NVR;
+use nvr::nvr::NVR;
 use sui::sui::SUI;
 use sui::coin::Coin;
 use sui::event;

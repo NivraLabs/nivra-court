@@ -1,6 +1,6 @@
 [package]
 name = "nivra"
-edition = "2024.beta"
+edition = "2024"
 
 [dependencies]
 seal = { git = "https://github.com/MystenLabs/seal.git", subdir = "move/seal", rev = "seal-v0.5.12" }

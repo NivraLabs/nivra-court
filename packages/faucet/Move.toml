@@ -1,9 +1,6 @@
 [package]
 name = "faucet"
-edition = "2024.beta"
+edition = "2024"
 
 [dependencies]
-token = { local = "../token" }
-
-[addresses]
-faucet = "0x0"
+nvr = { local = "../nvr" }
