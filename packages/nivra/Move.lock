@@ -5,43 +5,31 @@
 version = 4
 
 [pinned.testnet.MoveStdlib]
-source = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/move-stdlib", rev = "384b1c7ff289b32ed2664f29dc47dbc879fa43ee" }
-use_environment = "testnet"
-manifest_digest = "C4FE4C91DE74CBF223B2E380AE40F592177D21870DC2D7EB6227D2D694E05363"
-deps = {}
-
-[pinned.testnet.MoveStdlib_1]
-source = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/move-stdlib", rev = "6656ec8446e425115499bc23f245d2f2afc610f4" }
+source = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/move-stdlib", rev = "b979a730b73afb8e5f9a9672fa7b09afbff6479b" }
 use_environment = "testnet"
 manifest_digest = "C4FE4C91DE74CBF223B2E380AE40F592177D21870DC2D7EB6227D2D694E05363"
 deps = {}
 
 [pinned.testnet.Sui]
-source = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "384b1c7ff289b32ed2664f29dc47dbc879fa43ee" }
+source = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "b979a730b73afb8e5f9a9672fa7b09afbff6479b" }
 use_environment = "testnet"
 manifest_digest = "7AFB66695545775FBFBB2D3078ADFD084244D5002392E837FDE21D9EA1C6D01C"
 deps = { MoveStdlib = "MoveStdlib" }
 
-[pinned.testnet.Sui_1]
-source = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "6656ec8446e425115499bc23f245d2f2afc610f4" }
-use_environment = "testnet"
-manifest_digest = "7AFB66695545775FBFBB2D3078ADFD084244D5002392E837FDE21D9EA1C6D01C"
-deps = { MoveStdlib = "MoveStdlib_1" }
-
 [pinned.testnet.nivra]
 source = { root = true }
 use_environment = "testnet"
-manifest_digest = "29E0F6E7BA9E0B7EF4E1B20DAC559A99BF8DCD34FF31792768F8D39F7C17D439"
+manifest_digest = "2E8F56A5C22CED5BCD96EE27F9F0056C7376F4CFA1D57A75257B3C67C8802D82"
 deps = { nvr = "nvr", seal = "seal", std = "MoveStdlib", sui = "Sui" }
 
 [pinned.testnet.nvr]
-source = { local = "../nvr" }
+source = { git = "https://github.com/NivraLabs/nivra-court.git", subdir = "packages/nvr", rev = "b6816971488ebfdb6e2276a71c3df64e5f7106b0" }
 use_environment = "testnet"
 manifest_digest = "5745706258F61D6CE210904B3E6AE87A73CE9D31A6F93BE4718C442529332A87"
 deps = { std = "MoveStdlib", sui = "Sui" }
 
 [pinned.testnet.seal]
-source = { git = "https://github.com/MystenLabs/seal.git", subdir = "move/seal", rev = "c451196b077dbb3ab68e8c1f212ce5ecf090b41a" }
+source = { git = "https://github.com/MystenLabs/seal.git", subdir = "move/seal", rev = "436ea0a868bfc5540c482b3892122d29cc987f89" }
 use_environment = "testnet"
-manifest_digest = "9675E52D5655C9927A5A3605A47C863F18F9D51ABF6D3799F1BD85434A3A53BA"
-deps = { Sui = "Sui_1" }
+manifest_digest = "5745706258F61D6CE210904B3E6AE87A73CE9D31A6F93BE4718C442529332A87"
+deps = { std = "MoveStdlib", sui = "Sui" }

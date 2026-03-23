@@ -3,5 +3,5 @@ name = "nivra"
 edition = "2024"
 
 [dependencies]
-seal = { git = "https://github.com/MystenLabs/seal.git", subdir = "move/seal", rev = "seal-v0.5.12" }
-nvr = { local = "../nvr" }
+seal = { git = "https://github.com/MystenLabs/seal.git", subdir = "move/seal", rev = "seal-v0.6.2" }
+nvr = { git = "https://github.com/NivraLabs/nivra-court.git", subdir = "packages/nvr", rev = "main" }
