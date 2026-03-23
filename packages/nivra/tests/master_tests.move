@@ -130,6 +130,27 @@ fun open_dispute(scenario: &mut Scenario, clock: &Clock) {
     test_scenario::return_shared(court);
 }
 
+/// Open a dispute as PARTY_A against a fake contract, specifying max_appeals.
+fun open_dispute_with_appeals(scenario: &mut Scenario, clock: &Clock, max_appeals: u8) {
+    scenario.next_tx(PARTY_A);
+    let mut court = scenario.take_shared<Court>();
+    let fee = mint_sui(DISPUTE_FEE, scenario.ctx());
+
+    court::open_dispute(
+        &mut court,
+        fee,
+        object::id_from_address(@0xF0),
+        string::utf8(b"Test dispute"),
+        vector[string::utf8(b"Option A"), string::utf8(b"Option B")],
+        vector[PARTY_A, PARTY_B],
+        max_appeals,
+        clock,
+        scenario.ctx(),
+    );
+
+    test_scenario::return_shared(court);
+}
+
 /// PARTY_B accepts the open dispute.
 fun accept_dispute(scenario: &mut Scenario, clock: &Clock) {
     scenario.next_tx(PARTY_B);
@@ -580,6 +601,143 @@ fun test_dispute_completion() {
         assert!(
             dispute::status(&dispute) == constants::dispute_status_completed()
         );
+
+        test_scenario::return_shared(registry);
+        test_scenario::return_shared(dispute);
+        test_scenario::return_shared(court);
+    };
+
+    clock.destroy_for_testing();
+    scenario.end();
+}
+
+// --- 12. Full dispute to completion with an appeal round ---
+
+#[test]
+fun test_dispute_appeal_completion() {
+    let mut scenario = setup_registry();
+    // Use init_nivsters = 1. First round needs 1 nivster. Appeal needs 2. 
+    // Staking 3 total covers all possibilities.
+    setup_court(&mut scenario, 1);
+
+    stake_nvr(&mut scenario, NIVSTER_1, MIN_STAKE);
+    stake_nvr(&mut scenario, NIVSTER_2, MIN_STAKE);
+    stake_nvr(&mut scenario, NIVSTER_3, MIN_STAKE);
+
+    let mut clock = clock::create_for_testing(scenario.ctx());
+    
+    // --- ROUND 0 ---
+    open_dispute_with_appeals(&mut scenario, &clock, 1);
+    accept_dispute(&mut scenario, &clock);
+
+    scenario.next_tx(@0x0);
+    random::create_for_testing(scenario.ctx());
+
+    draw_nivsters(&mut scenario, &clock);
+
+    // Skip past evidence phase to enter voting phase
+    clock.increment_for_testing(EVIDENCE_MS + 1);
+
+    // Inject fake decrypted vote: Option 0 wins
+    scenario.next_tx(ADMIN);
+    {
+        let mut dispute = scenario.take_shared<Dispute>();
+        
+        let nivsters = dispute::voters(&dispute).keys();
+        assert!(nivsters.length() == 1, 0);
+        let drawn_nivster = nivsters[0];
+
+        dispute::add_fake_vote_for_testing(&mut dispute, drawn_nivster, 0);
+        dispute::tally_fake_votes_for_testing(&mut dispute);
+
+        assert!(dispute::status(&dispute) == constants::dispute_status_tallied(), 1);
+
+        test_scenario::return_shared(dispute);
+    };
+
+    // Skip past voting phase to enter appeal phase
+    clock.increment_for_testing(VOTING_MS);
+
+    // --- APPEAL ROUND 1 ---
+    let appeal_fee_amount = 2600; // 1000 * 13 / 5
+
+    scenario.next_tx(PARTY_B);
+    {
+        let mut court = scenario.take_shared<Court>();
+        let mut dispute = scenario.take_shared<Dispute>();
+        let fee = mint_sui(appeal_fee_amount, scenario.ctx());
+
+        court::open_appeal(
+            &mut court,
+            &mut dispute,
+            fee,
+            &clock,
+            scenario.ctx(),
+        );
+
+        test_scenario::return_shared(dispute);
+        test_scenario::return_shared(court);
+    };
+
+    scenario.next_tx(PARTY_A);
+    {
+        let mut court = scenario.take_shared<Court>();
+        let mut dispute = scenario.take_shared<Dispute>();
+        let fee = mint_sui(appeal_fee_amount, scenario.ctx());
+
+        court::accept_dispute(
+            &mut court,
+            &mut dispute,
+            fee,
+            &clock,
+            scenario.ctx(),
+        );
+
+        test_scenario::return_shared(dispute);
+        test_scenario::return_shared(court);
+    };
+
+    // Draw for appeal round
+    scenario.next_tx(@0x0);
+    draw_nivsters(&mut scenario, &clock);
+
+    // Skip past evidence phase of appeal round to enter voting phase
+    clock.increment_for_testing(EVIDENCE_MS + 1);
+
+    scenario.next_tx(ADMIN);
+    {
+        let mut dispute = scenario.take_shared<Dispute>();
+        
+        let nivsters = dispute::voters(&dispute).keys();
+        nivsters.do!(|drawn| {
+            dispute::add_fake_vote_for_testing(&mut dispute, drawn, 1);
+        });
+
+        dispute::tally_fake_votes_for_testing(&mut dispute);
+
+        assert!(dispute::status(&dispute) == constants::dispute_status_tallied(), 3);
+
+        test_scenario::return_shared(dispute);
+    };
+
+    // Skip past voting phase AND appeal phase to complete the dispute
+    clock.increment_for_testing(VOTING_MS + APPEAL_MS + 1);
+
+    scenario.next_tx(PARTY_B);
+    {
+        let mut court = scenario.take_shared<Court>();
+        let mut dispute = scenario.take_shared<Dispute>();
+        let mut registry = scenario.take_shared<Registry>();
+
+        court::complete_dispute(
+            &mut court,
+            &mut dispute,
+            &mut registry,
+            &clock,
+            scenario.ctx(),
+        );
+
+        assert!(dispute::status(&dispute) == constants::dispute_status_completed(), 4);
 
         test_scenario::return_shared(registry);
         test_scenario::return_shared(dispute);
