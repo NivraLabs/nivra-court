@@ -318,7 +318,7 @@ public fun withdraw(
         if (stake.amount >= court.economics.min_stake) {
             court.worker_pool.sub_stake(pos, amount_nvr);
         } else {
-            court.remove_from_worker_pool(ctx.sender());
+            remove_from_worker_pool(court, ctx.sender(), pos);
         };
     };
 
@@ -367,7 +367,11 @@ public fun leave_worker_pool(
     let stake = court.stakes.borrow_mut(ctx.sender());
     assert!(stake.worker_pool_pos.is_some(), ENotInWorkerPool);
 
-    court.remove_from_worker_pool(ctx.sender());
+    remove_from_worker_pool(
+        court, 
+        ctx.sender(), 
+        *stake.worker_pool_pos.borrow()
+    );
 
     event::emit(WorkerPoolEvent {
         court: object::id(court),
@@ -1023,7 +1027,7 @@ public fun create_court(
         economics,
         operation,
         stakes: linked_table::new(ctx),
-        worker_pool: worker_pool::empty(),
+        worker_pool: worker_pool::empty(ctx),
         stake_pool: balance::zero<NVR>(),
         reward_pool: balance::zero<SUI>(),
     };
@@ -1122,34 +1126,23 @@ public fun migrate(
 fun remove_from_worker_pool(
     court: &mut Court,
     addr: address,
+    idx: u64,
 ) {
     let last_pos_idx = court.worker_pool.length() - 1;
-    let (idx, idx_val) = {
-        let removed_staker = court.stakes.borrow_mut(addr);
-        let idx = *removed_staker.worker_pool_pos.borrow();
-        let idx_val = removed_staker.amount;
 
-        removed_staker.worker_pool_pos = option::none();
-        (idx, idx_val)
-    };
-
+    // Update the position of the last staker in the worker pool
     if (last_pos_idx != idx) {
-        let last_pos_addr = court.worker_pool.nivster_by_idx(last_pos_idx);
+        let (last_pos_addr, _) = court.worker_pool.get_idx(last_pos_idx);
         let last_staker = court.stakes.borrow_mut(last_pos_addr);
         last_staker.worker_pool_pos = option::some(idx);
-
-        court.worker_pool.swap_remove(
-            idx, 
-            idx_val, 
-            last_staker.amount,
-        );
-    } else {
-        court.worker_pool.swap_remove(
-            idx, 
-            0, // No swap required
-            idx_val,
-        );
     };
+
+    // Update the status and position of the removed staker.
+    let removed_staker = court.stakes.borrow_mut(addr);
+    removed_staker.worker_pool_pos = option::none();
+
+    // Perform the swap remove.
+    court.worker_pool.swap_remove(idx);
 }
 
 fun serialize_dispute_config(
@@ -1196,15 +1189,15 @@ fun random_nivster_selection(
     while (nivsters_selected.length() < nivster_count) {
         let selection_threshold = generator.generate_u64_in_range(0, sum);
         // Find the first nivster n whose cumulative stake sum is >= threshold.
-        let nivster = court.worker_pool.search(selection_threshold);
+        let wp_idx = court.worker_pool.search(selection_threshold);
+        let (n_addr, n_stake) = court.worker_pool.get_idx(wp_idx);
+
         // Remove the n from the worker pool to prevent duplicate selections.
-        court.remove_from_worker_pool(nivster);
-
-        let stake = court.stakes.borrow_mut(nivster);
+        remove_from_worker_pool(court, n_addr, wp_idx);
         // Narrow the selection range by nivster's stake amount.
-        sum = sum - stake.amount;
+        sum = sum - n_stake;
 
-        nivsters_selected.push_back(nivster);
+        nivsters_selected.push_back(n_addr);
     };
 
     nivsters_selected.do!(|nivster| {
