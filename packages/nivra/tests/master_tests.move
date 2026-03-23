@@ -17,6 +17,7 @@ use nivra::court::{
 };
 use nivra::dispute::{Self, Dispute};
 use nivra::constants;
+use sui::address::from_u256;
 
 // === Test Addresses ===
 const ADMIN:      address = @0x78b21978658505237a465ef20a4cf3ce2d418fda9cfb3ce4a0e4be7f9a16187d;
@@ -871,5 +872,21 @@ fun test_dispute_reward_distribution() {
     };
 
     clock.destroy_for_testing();
+    scenario.end();
+}
+
+// --- 14. Dispute reward distribution ---
+#[test]
+fun test_large_dispute() {
+    let mut scenario = setup_registry();
+    setup_court(&mut scenario, 11);
+
+    let mut i = 0;
+
+    while (i < 160) {
+        stake_nvr(&mut scenario, sui::address::from_u256(1000 + i), 10 * MIN_STAKE);
+        i = i + 1;
+    };
+
     scenario.end();
 }
