@@ -142,7 +142,7 @@ public fun add_stake(worker_pool: &mut WorkerPool, idx: u64, val: u64) {
     worker_pool.add_bit_idx(idx, val);
 }
 
-public(package) fun sub_stake(worker_pool: &mut WorkerPool, idx: u64, val: u64) {
+public fun sub_stake(worker_pool: &mut WorkerPool, idx: u64, val: u64) {
     assert!(idx < worker_pool.length, EIndexOutOfBounds);
     worker_pool.sub_bit_idx(idx, val);
 }
