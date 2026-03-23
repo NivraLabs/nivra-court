@@ -17,7 +17,6 @@ use nivra::court::{
 };
 use nivra::dispute::{Self, Dispute};
 use nivra::constants;
-use sui::address::from_u256;
 
 // === Test Addresses ===
 const ADMIN:      address = @0x78b21978658505237a465ef20a4cf3ce2d418fda9cfb3ce4a0e4be7f9a16187d;
@@ -110,6 +109,53 @@ fun stake_nvr(scenario: &mut Scenario, actor: address, amount: u64) {
     test_scenario::return_shared(court);
 }
 
+fun join_worker_pool(scenario: &mut Scenario, actor: address) {
+    scenario.next_tx(actor);
+    let mut court = scenario.take_shared<Court>();
+    court::join_worker_pool(&mut court, scenario.ctx());
+    test_scenario::return_shared(court);
+}
+
+fun leave_worker_pool(scenario: &mut Scenario, actor: address) {
+    scenario.next_tx(actor);
+    let mut court = scenario.take_shared<Court>();
+    court::leave_worker_pool(&mut court, scenario.ctx());
+    test_scenario::return_shared(court);
+}
+
+fun assert_worker_pool_state(
+    scenario: &mut Scenario,
+    expected_keys: vector<address>,
+    expected_bits: vector<u64>,
+    expected_prefix_sums: vector<u64>,
+    expected_total: u64,
+) {
+    scenario.next_tx(ADMIN);
+    let court = scenario.take_shared<Court>();
+    let len = court::worker_pool_length_for_testing(&court);
+
+    assert!(len == expected_keys.length(), 100);
+    assert!(len == expected_bits.length(), 101);
+    assert!(len == expected_prefix_sums.length(), 102);
+
+    let mut i = 0;
+    while (i < len) {
+        assert!(court::worker_pool_key_for_testing(&court, i) == expected_keys[i], 103 + i);
+        assert!(court::worker_pool_bit_value_for_testing(&court, i) == expected_bits[i], 203 + i);
+        assert!(court::worker_pool_prefix_sum_for_testing(&court, i) == expected_prefix_sums[i], 303 + i);
+        i = i + 1;
+    };
+
+    if (len == 0) {
+        assert!(expected_total == 0, 403);
+    } else {
+        assert!(expected_prefix_sums[len - 1] == expected_total, 404);
+        assert!(court::worker_pool_prefix_sum_for_testing(&court, len - 1) == expected_total, 405);
+    };
+
+    test_scenario::return_shared(court);
+}
+
 /// Open a dispute as PARTY_A against a fake contract.
 fun open_dispute(scenario: &mut Scenario, clock: &Clock) {
     scenario.next_tx(PARTY_A);
@@ -123,7 +169,7 @@ fun open_dispute(scenario: &mut Scenario, clock: &Clock) {
         string::utf8(b"Test dispute"),
         vector[string::utf8(b"Option A"), string::utf8(b"Option B")],
         vector[PARTY_A, PARTY_B],
-        0,
+        3,
         clock,
         scenario.ctx(),
     );
@@ -217,6 +263,230 @@ fun test_stake_and_withdraw() {
 
         test_scenario::return_shared(court);
     };
+
+    scenario.end();
+}
+
+#[test]
+#[expected_failure(abort_code = court::ENotEnoughNivsters)]
+fun test_leave_worker_pool_prevents_draw() {
+    let mut scenario = setup_registry();
+    setup_court(&mut scenario, 1);
+
+    stake_nvr(&mut scenario, NIVSTER_1, MIN_STAKE);
+    leave_worker_pool(&mut scenario, NIVSTER_1);
+
+    let clock = clock::create_for_testing(scenario.ctx());
+    open_dispute(&mut scenario, &clock);
+    accept_dispute(&mut scenario, &clock);
+
+    scenario.next_tx(@0x0);
+    random::create_for_testing(scenario.ctx());
+
+    draw_nivsters(&mut scenario, &clock);
+
+    clock.destroy_for_testing();
+    scenario.end();
+}
+
+#[test]
+fun test_join_worker_pool_after_leave_restores_draw_eligibility() {
+    let mut scenario = setup_registry();
+    setup_court(&mut scenario, 1);
+
+    stake_nvr(&mut scenario, NIVSTER_1, MIN_STAKE);
+    leave_worker_pool(&mut scenario, NIVSTER_1);
+    join_worker_pool(&mut scenario, NIVSTER_1);
+
+    let clock = clock::create_for_testing(scenario.ctx());
+    open_dispute(&mut scenario, &clock);
+    accept_dispute(&mut scenario, &clock);
+
+    scenario.next_tx(@0x0);
+    random::create_for_testing(scenario.ctx());
+    draw_nivsters(&mut scenario, &clock);
+
+    scenario.next_tx(PARTY_A);
+    {
+        let dispute = scenario.take_shared<Dispute>();
+        let voters = dispute::voters(&dispute).keys();
+        assert!(voters.length() == 1, 11);
+        assert!(voters[0] == NIVSTER_1, 12);
+        test_scenario::return_shared(dispute);
+    };
+
+    clock.destroy_for_testing();
+    scenario.end();
+}
+
+#[test]
+#[expected_failure(abort_code = court::ENotEnoughNivsters)]
+fun test_withdraw_below_min_stake_removes_from_worker_pool() {
+    let mut scenario = setup_registry();
+    setup_court(&mut scenario, 1);
+
+    stake_nvr(&mut scenario, NIVSTER_1, MIN_STAKE);
+
+    scenario.next_tx(NIVSTER_1);
+    {
+        let mut court = scenario.take_shared<Court>();
+        let (nvr, sui) = court::withdraw(&mut court, 1, 0, scenario.ctx());
+        assert!(nvr.value() == 1, 13);
+        assert!(sui.value() == 0, 14);
+        nvr.into_balance().destroy_for_testing();
+        sui.into_balance().destroy_for_testing();
+        test_scenario::return_shared(court);
+    };
+
+    let clock = clock::create_for_testing(scenario.ctx());
+    open_dispute(&mut scenario, &clock);
+    accept_dispute(&mut scenario, &clock);
+
+    scenario.next_tx(@0x0);
+    random::create_for_testing(scenario.ctx());
+
+    draw_nivsters(&mut scenario, &clock);
+
+    clock.destroy_for_testing();
+    scenario.end();
+}
+
+#[test]
+fun test_stake_rejoins_worker_pool_after_auto_removal() {
+    let mut scenario = setup_registry();
+    setup_court(&mut scenario, 1);
+
+    stake_nvr(&mut scenario, NIVSTER_1, MIN_STAKE);
+
+    scenario.next_tx(NIVSTER_1);
+    {
+        let mut court = scenario.take_shared<Court>();
+        let (nvr, sui) = court::withdraw(&mut court, 1, 0, scenario.ctx());
+        assert!(nvr.value() == 1, 15);
+        assert!(sui.value() == 0, 16);
+        nvr.into_balance().destroy_for_testing();
+        sui.into_balance().destroy_for_testing();
+        test_scenario::return_shared(court);
+    };
+
+    stake_nvr(&mut scenario, NIVSTER_1, 1);
+
+    let clock = clock::create_for_testing(scenario.ctx());
+    open_dispute(&mut scenario, &clock);
+    accept_dispute(&mut scenario, &clock);
+
+    scenario.next_tx(@0x0);
+    random::create_for_testing(scenario.ctx());
+    draw_nivsters(&mut scenario, &clock);
+
+    scenario.next_tx(PARTY_A);
+    {
+        let dispute = scenario.take_shared<Dispute>();
+        let voters = dispute::voters(&dispute).keys();
+        assert!(voters.length() == 1, 17);
+        assert!(voters[0] == NIVSTER_1, 18);
+        test_scenario::return_shared(dispute);
+    };
+
+    clock.destroy_for_testing();
+    scenario.end();
+}
+
+#[test]
+fun test_worker_pool_bit_structure_after_multiple_updates() {
+    let mut scenario = setup_registry();
+    setup_court(&mut scenario, 1);
+
+    stake_nvr(&mut scenario, NIVSTER_1, 500);
+    assert_worker_pool_state(
+        &mut scenario,
+        vector[NIVSTER_1],
+        vector[500],
+        vector[500],
+        500,
+    );
+
+    stake_nvr(&mut scenario, NIVSTER_2, 700);
+    assert_worker_pool_state(
+        &mut scenario,
+        vector[NIVSTER_1, NIVSTER_2],
+        vector[500, 1200],
+        vector[500, 1200],
+        1200,
+    );
+
+    stake_nvr(&mut scenario, NIVSTER_3, 900);
+    assert_worker_pool_state(
+        &mut scenario,
+        vector[NIVSTER_1, NIVSTER_2, NIVSTER_3],
+        vector[500, 1200, 900],
+        vector[500, 1200, 2100],
+        2100,
+    );
+
+    stake_nvr(&mut scenario, KEY_SERVER, 1100);
+    assert_worker_pool_state(
+        &mut scenario,
+        vector[NIVSTER_1, NIVSTER_2, NIVSTER_3, KEY_SERVER],
+        vector[500, 1200, 900, 3200],
+        vector[500, 1200, 2100, 3200],
+        3200,
+    );
+
+    leave_worker_pool(&mut scenario, NIVSTER_2);
+    assert_worker_pool_state(
+        &mut scenario,
+        vector[NIVSTER_1, KEY_SERVER, NIVSTER_3],
+        vector[500, 1600, 900],
+        vector[500, 1600, 2500],
+        2500,
+    );
+
+    leave_worker_pool(&mut scenario, NIVSTER_1);
+    assert_worker_pool_state(
+        &mut scenario,
+        vector[NIVSTER_3, KEY_SERVER],
+        vector[900, 2000],
+        vector[900, 2000],
+        2000,
+    );
+
+    join_worker_pool(&mut scenario, NIVSTER_2);
+    assert_worker_pool_state(
+        &mut scenario,
+        vector[NIVSTER_3, KEY_SERVER, NIVSTER_2],
+        vector[900, 2000, 700],
+        vector[900, 2000, 2700],
+        2700,
+    );
+
+    scenario.next_tx(KEY_SERVER);
+    {
+        let mut court = scenario.take_shared<Court>();
+        let (nvr, sui) = court::withdraw(&mut court, 700, 0, scenario.ctx());
+        assert!(nvr.value() == 700, 400);
+        assert!(sui.value() == 0, 401);
+        nvr.into_balance().destroy_for_testing();
+        sui.into_balance().destroy_for_testing();
+        test_scenario::return_shared(court);
+    };
+
+    assert_worker_pool_state(
+        &mut scenario,
+        vector[NIVSTER_3, NIVSTER_2],
+        vector[900, 1600],
+        vector[900, 1600],
+        1600,
+    );
+
+    stake_nvr(&mut scenario, NIVSTER_1, 50);
+    assert_worker_pool_state(
+        &mut scenario,
+        vector[NIVSTER_3, NIVSTER_2, NIVSTER_1],
+        vector[900, 1600, 550],
+        vector[900, 1600, 2150],
+        2150,
+    );
 
     scenario.end();
 }
@@ -888,5 +1158,167 @@ fun test_large_dispute() {
         i = i + 1;
     };
 
+    let mut clock = clock::create_for_testing(scenario.ctx());
+    open_dispute(&mut scenario, &clock);
+    accept_dispute(&mut scenario, &clock);
+
+    scenario.next_tx(@0x0);
+    random::create_for_testing(scenario.ctx());
+    draw_nivsters(&mut scenario, &clock);
+
+    // Skip past evidence phase to enter voting phase
+    clock.increment_for_testing(EVIDENCE_MS + 1);
+
+    // Inject fake decrypted vote: Option 0 wins
+    scenario.next_tx(ADMIN);
+    {
+        let mut dispute = scenario.take_shared<Dispute>();
+        
+        let nivsters = dispute::voters(&dispute).keys();
+        assert!(nivsters.length() == 11, 0);
+        let drawn_nivster = nivsters[0];
+
+        dispute::add_fake_vote_for_testing(&mut dispute, drawn_nivster, 0);
+        dispute::tally_fake_votes_for_testing(&mut dispute);
+
+        assert!(dispute::status(&dispute) == constants::dispute_status_tallied(), 1);
+
+        test_scenario::return_shared(dispute);
+    };
+
+    // Skip past voting phase to enter appeal phase
+    clock.increment_for_testing(VOTING_MS);
+
+    // --- APPEAL ROUND 1 ---
+    let appeal_fee_amount = 2600; // 1000 * 13 / 5
+
+    scenario.next_tx(PARTY_B);
+    {
+        let mut court = scenario.take_shared<Court>();
+        let mut dispute = scenario.take_shared<Dispute>();
+        let fee = mint_sui(appeal_fee_amount, scenario.ctx());
+
+        court::open_appeal(
+            &mut court,
+            &mut dispute,
+            fee,
+            &clock,
+            scenario.ctx(),
+        );
+
+        test_scenario::return_shared(dispute);
+        test_scenario::return_shared(court);
+    };
+
+    scenario.next_tx(PARTY_A);
+    {
+        let mut court = scenario.take_shared<Court>();
+        let mut dispute = scenario.take_shared<Dispute>();
+        let fee = mint_sui(appeal_fee_amount, scenario.ctx());
+
+        court::accept_dispute(
+            &mut court,
+            &mut dispute,
+            fee,
+            &clock,
+            scenario.ctx(),
+        );
+
+        test_scenario::return_shared(dispute);
+        test_scenario::return_shared(court);
+    };
+
+    // Draw for appeal round
+    scenario.next_tx(@0x0);
+    draw_nivsters(&mut scenario, &clock);
+
+    // Skip past evidence phase to enter voting phase
+    clock.increment_for_testing(EVIDENCE_MS + 1);
+
+    // Inject fake decrypted vote: Option 0 wins
+    scenario.next_tx(ADMIN);
+    {
+        let mut dispute = scenario.take_shared<Dispute>();
+        
+        let nivsters = dispute::voters(&dispute).keys();
+        let drawn_nivster = nivsters[0];
+
+        dispute::add_fake_vote_for_testing(&mut dispute, drawn_nivster, 0);
+        dispute::tally_fake_votes_for_testing(&mut dispute);
+
+        assert!(dispute::status(&dispute) == constants::dispute_status_tallied(), 1);
+
+        test_scenario::return_shared(dispute);
+    };
+
+    // Skip past voting phase to enter appeal phase
+    clock.increment_for_testing(VOTING_MS);
+
+    // --- APPEAL ROUND 2 ---
+    let appeal_fee_amount = 6760;
+
+    scenario.next_tx(PARTY_B);
+    {
+        let mut court = scenario.take_shared<Court>();
+        let mut dispute = scenario.take_shared<Dispute>();
+        let fee = mint_sui(appeal_fee_amount, scenario.ctx());
+
+        court::open_appeal(
+            &mut court,
+            &mut dispute,
+            fee,
+            &clock,
+            scenario.ctx(),
+        );
+
+        test_scenario::return_shared(dispute);
+        test_scenario::return_shared(court);
+    };
+
+    scenario.next_tx(PARTY_A);
+    {
+        let mut court = scenario.take_shared<Court>();
+        let mut dispute = scenario.take_shared<Dispute>();
+        let fee = mint_sui(appeal_fee_amount, scenario.ctx());
+
+        court::accept_dispute(
+            &mut court,
+            &mut dispute,
+            fee,
+            &clock,
+            scenario.ctx(),
+        );
+
+        test_scenario::return_shared(dispute);
+        test_scenario::return_shared(court);
+    };
+
+    // Draw for appeal round
+    scenario.next_tx(@0x0);
+    draw_nivsters(&mut scenario, &clock);
+
+    // Skip past evidence phase to enter voting phase
+    clock.increment_for_testing(EVIDENCE_MS + 1);
+
+    // Inject fake decrypted vote: Option 0 wins
+    scenario.next_tx(ADMIN);
+    {
+        let mut dispute = scenario.take_shared<Dispute>();
+        
+        let nivsters = dispute::voters(&dispute).keys();
+        let drawn_nivster = nivsters[0];
+
+        dispute::add_fake_vote_for_testing(&mut dispute, drawn_nivster, 0);
+        dispute::tally_fake_votes_for_testing(&mut dispute);
+
+        assert!(dispute::status(&dispute) == constants::dispute_status_tallied(), 1);
+
+        test_scenario::return_shared(dispute);
+    };
+
+    // Skip past voting phase to enter appeal phase
+    clock.increment_for_testing(VOTING_MS);
+
+    clock.destroy_for_testing();
     scenario.end();
 }

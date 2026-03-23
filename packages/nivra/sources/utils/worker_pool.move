@@ -240,3 +240,9 @@ fun change_key(worker_pool: &mut WorkerPool, idx: u64, key: address): address {
 
     prev_key
 }
+
+// === Test Functions ===
+#[test_only]
+public fun bit_value_for_testing(worker_pool: &WorkerPool, idx: u64): u64 {
+    worker_pool.bit_idx(idx)
+}

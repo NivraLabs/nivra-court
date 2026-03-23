@@ -303,6 +303,7 @@ public fun withdraw(
 ): (Coin<NVR>, Coin<SUI>) {
     court.validate_version();
     let stake = court.stakes.borrow_mut(ctx.sender());
+    let stake_before_withdraw = stake.amount;
 
     assert!(stake.amount >= amount_nvr, ENotEnoughNVR);
     assert!(stake.reward_amount >= amount_sui, ENotEnoughSUI);
@@ -318,7 +319,7 @@ public fun withdraw(
         if (stake.amount >= court.economics.min_stake) {
             court.worker_pool.sub_stake(pos, amount_nvr);
         } else {
-            court.remove_from_worker_pool(ctx.sender());
+            court.remove_from_worker_pool(ctx.sender(), stake_before_withdraw);
         };
     };
 
@@ -366,8 +367,9 @@ public fun leave_worker_pool(
 
     let stake = court.stakes.borrow_mut(ctx.sender());
     assert!(stake.worker_pool_pos.is_some(), ENotInWorkerPool);
+    let stake_in_pool = stake.amount;
 
-    court.remove_from_worker_pool(ctx.sender());
+    court.remove_from_worker_pool(ctx.sender(), stake_in_pool);
 
     event::emit(WorkerPoolEvent {
         court: object::id(court),
@@ -1122,15 +1124,15 @@ public fun migrate(
 fun remove_from_worker_pool(
     court: &mut Court,
     nivster: address,
+    stake_in_pool: u64,
 ) {
     let last_pos_idx = court.worker_pool.length() - 1;
-    let (idx, idx_stake) = {
+    let idx = {
         let removed_staker = court.stakes.borrow_mut(nivster);
         let idx = *removed_staker.worker_pool_pos.borrow();
-        let idx_stake = removed_staker.amount;
         removed_staker.worker_pool_pos = option::none();
 
-        (idx, idx_stake)
+        idx
     };
 
     // Update the position of the last staker in the worker pool
@@ -1141,14 +1143,14 @@ fun remove_from_worker_pool(
 
         court.worker_pool.swap_remove(
             idx, 
-            idx_stake, 
+            stake_in_pool, 
             last_staker.amount,
         );
     } else {
         court.worker_pool.swap_remove(
             idx, 
             0, 
-            idx_stake,
+            stake_in_pool,
         );
     };
 }
@@ -1195,12 +1197,13 @@ fun random_nivster_selection(
     let mut sum = court.worker_pool.prefix_sum(court.worker_pool.length() - 1);
 
     while (nivsters_selected.length() < nivster_count) {
-        let selection_threshold = generator.generate_u64_in_range(0, sum);
+        let selection_threshold = generator.generate_u64_in_range(1, sum);
         // Find the first nivster n whose cumulative stake sum is >= threshold.
         let nivster = court.worker_pool.search(selection_threshold);
+        let stake_in_pool = court.stakes.borrow(nivster).amount;
 
         // Remove the n from the worker pool to prevent duplicate selections.
-        court.remove_from_worker_pool(nivster);
+        court.remove_from_worker_pool(nivster, stake_in_pool);
 
         // Narrow the selection range by nivster's stake amount.
         let stake = court.stakes.borrow(nivster);
@@ -1372,4 +1375,25 @@ fun unlock_stake_with_rewards(
         unlocked_nvr: amount,
         dispute_id,
     });
+}
+
+// === Test Functions ===
+#[test_only]
+public fun worker_pool_length_for_testing(court: &Court): u64 {
+    court.worker_pool.length()
+}
+
+#[test_only]
+public fun worker_pool_key_for_testing(court: &Court, idx: u64): address {
+    court.worker_pool.key(idx)
+}
+
+#[test_only]
+public fun worker_pool_bit_value_for_testing(court: &Court, idx: u64): u64 {
+    worker_pool::bit_value_for_testing(&court.worker_pool, idx)
+}
+
+#[test_only]
+public fun worker_pool_prefix_sum_for_testing(court: &Court, idx: u64): u64 {
+    court.worker_pool.prefix_sum(idx)
 }
