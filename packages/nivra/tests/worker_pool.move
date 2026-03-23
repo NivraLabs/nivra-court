@@ -18,7 +18,7 @@ module nivra::worker_pool_tests {
 
         // Search thresholds:
         // 0..10 should map to A
-        // 10..30 should map to B
+        // 11..30 should map to B
         let addr_9 = worker_pool::search(&pool, 10);
         let addr_10 = worker_pool::search(&pool, 30);
 
