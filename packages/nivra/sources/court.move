@@ -1122,8 +1122,6 @@ public fun migrate(
     court.allowed_versions = registry.allowed_versions();
 }
 
-// === Package Functions ===
-
 // === Private Functions ===
 fun remove_from_worker_pool(
     court: &mut Court,

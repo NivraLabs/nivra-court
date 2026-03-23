@@ -21,13 +21,13 @@ use nivra::constants::reputation_threshold;
 const NIVRA_PROTOCOL: address = 
     @0x78b21978658505237a465ef20a4cf3ce2d418fda9cfb3ce4a0e4be7f9a16187d;
 const RASMUS: address = 
-    @0x0;
+    @0x1;
 const ELMERI: address = 
-    @0x0;
+    @0x2;
 const PATRIK: address = 
-    @0x0;
+    @0x3;
 const LUKA: address = 
-    @0x0;
+    @0x4;
 
 // === Errors ===
 const EWrongVersion: u64 = 1;
@@ -204,7 +204,7 @@ public fun treasury_address(registry: &Registry): address {
 
 public fun allowed_versions(registry: &Registry): VecSet<u64> {
     registry.validate_version();
-    registry.allowed_versions()
+    registry.allowed_versions
 }
 
 public fun admins(registry: &Registry): VecSet<address> {
@@ -661,4 +661,10 @@ public(package) fun register_case_won(
         stats.rewards_total_sui = stats.rewards_total_sui +
             (reward_sui as u128);
     };
+}
+
+// === Test Functions ===
+#[test_only]
+public fun init_for_testing(ctx: &mut TxContext) {
+    init(ctx);
 }
