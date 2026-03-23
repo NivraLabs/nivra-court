@@ -916,7 +916,7 @@ public(package) fun add_evidence(
 
     assert!(!party_evidence.contains(&evidence), EEvidenceAlreadyRegistered);
     assert!(
-        party_evidence.length() <= max_evidence_per_party(), 
+        party_evidence.length() < max_evidence_per_party(), 
         EMaxEvidenceReached
     );
 
