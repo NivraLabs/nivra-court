@@ -23,14 +23,17 @@ public struct WorkerPool has key, store {
 }
 
 public struct Slice has drop, store {
-    addresses: vector<address>,
-    stakes: vector<u64>,
-    bit: vector<u64>,
+    bit: vector<Entry>,
+}
+
+public struct Entry has copy, drop, store {
+    key: address,
+    value: u64,
 }
 
 // === View Functions ===
-public fun length(self: &WorkerPool): u64 {
-    self.length
+public fun length(worker_pool: &WorkerPool): u64 {
+    worker_pool.length
 }
 
 public fun max_length(): u64 {
@@ -52,9 +55,10 @@ public(package) fun empty(ctx: &mut TxContext): WorkerPool {
             &mut worker_pool.id, 
             i, 
             Slice { 
-                addresses: vector::tabulate!(SLICE_SIZE, |_| @0x0),
-                stakes: vector::tabulate!(SLICE_SIZE, |_| 0),
-                bit: vector::tabulate!(SLICE_SIZE, |_| 0),
+                bit: vector::tabulate!(SLICE_SIZE, |_| Entry { 
+                    key: @0x0, 
+                    value: 0,
+                }),
             },
         );
 
@@ -64,73 +68,69 @@ public(package) fun empty(ctx: &mut TxContext): WorkerPool {
     worker_pool
 }
 
-public(package) fun destroy_empty(self: WorkerPool) {
-    assert!(self.length == 0, ENotEmpty);
+public(package) fun destroy_empty(worker_pool: WorkerPool) {
+    assert!(worker_pool.length == 0, ENotEmpty);
 
     let WorkerPool {
         id,
         length: _,
-    } = self;
+    } = worker_pool;
 
     id.delete();
 }
 
-public(package) fun get_idx(self: &WorkerPool, idx: u64): (address, u64) {
-    assert!(idx < self.length, EIndexOutOfBounds);
-    let (slice, sub_idx) = self.idx_location(idx);
-    let addr = slice.addresses[sub_idx];
-    let stake = slice.stakes[sub_idx];
-
-    (addr, stake)
-}
-
 public(package) fun push_back(
-    self: &mut WorkerPool, 
-    addr: address, 
-    stake: u64
+    worker_pool: &mut WorkerPool, 
+    key: address,
+    value: u64,
 ): u64 {
-    let idx = self.length;
+    let idx = worker_pool.length;
 
     assert!(idx < MAX_LENGTH, EWorkerPoolFull);
-    self.change_stake_idx(idx, addr, stake);
-    self.add_bit_idx(idx, stake);
-    self.length = self.length + 1;
+    worker_pool.change_key(idx, key);
+    worker_pool.add_bit_idx(idx, value);
+    worker_pool.length = worker_pool.length + 1;
 
     idx
 }
 
-public(package) fun swap_remove(self: &mut WorkerPool, idx: u64) {
-    assert!(idx < self.length, EIndexOutOfBounds);
+public(package) fun swap_remove(
+    worker_pool: &mut WorkerPool, 
+    idx: u64,
+    idx_stake: u64,
+    last_idx_stake: u64,
+) {
+    assert!(idx < worker_pool.length, EIndexOutOfBounds);
 
-    let last_idx = self.length - 1;
-    let (last_addr, last_stake) = self.change_stake_idx(last_idx, @0x0, 0);
-    self.sub_bit_idx(last_idx, last_stake);
+    let last_idx = worker_pool.length - 1;
+    let last_key = worker_pool.change_key(last_idx, @0x0);
+    worker_pool.sub_bit_idx(last_idx, last_idx_stake);
 
     if (idx != last_idx) {
-        let (_, stake_idx) = self.change_stake_idx(idx, last_addr, last_stake);
+        worker_pool.change_key(idx, last_key);
 
-        if (stake_idx > last_stake) {
-            let delta = stake_idx - last_stake;
-            self.sub_bit_idx(idx, delta);
+        if (idx_stake > last_idx_stake) {
+            let delta = idx_stake - last_idx_stake;
+            worker_pool.sub_bit_idx(idx, delta);
         };
 
-        if (stake_idx < last_stake) {
-            let delta = last_stake - stake_idx;
-            self.add_bit_idx(idx, delta);
+        if (idx_stake < last_idx_stake) {
+            let delta = last_idx_stake - idx_stake;
+            worker_pool.add_bit_idx(idx, delta);
         };
     };
 
-    self.length = self.length - 1;
+    worker_pool.length = worker_pool.length - 1;
 }
 
-public(package) fun prefix_sum(self: &WorkerPool, idx: u64): u64 {
-    assert!(idx < self.length, EIndexOutOfBounds);
+public(package) fun prefix_sum(worker_pool: &WorkerPool, idx: u64): u64 {
+    assert!(idx < worker_pool.length, EIndexOutOfBounds);
 
     let mut i = idx + 1;
     let mut sum = 0;
 
     while (i > 0) {
-        sum = sum + self.bit_idx(i - 1);
+        sum = sum + worker_pool.bit_idx(i - 1);
         i = i - (i & (bitwise_not(i) + 1));
     };
 
@@ -143,7 +143,7 @@ public(package) fun prefix_sum(self: &WorkerPool, idx: u64): u64 {
 /// 
 /// Total cumulative sum can be calculated with `prefix_sum()` function
 /// using index `worker_pool.length() - 1`, but it is not checked in the runtime to save computing resources.
-public(package) fun search(self: &WorkerPool, threshold: u64): u64 {
+public(package) fun search(worker_pool: &WorkerPool, threshold: u64): address {
     let mut sum = 0;
     let mut pos = 0;
     let mut i = 14; // LOG2(10_000)
@@ -151,8 +151,8 @@ public(package) fun search(self: &WorkerPool, threshold: u64): u64 {
     loop {
         let step = pos + (1 << i);
 
-        if (step < SIZE && sum + self.bit_idx(step - 1) < threshold) {
-            sum = sum + self.bit_idx(step - 1);
+        if (step < SIZE && sum + worker_pool.bit_idx(step - 1) < threshold) {
+            sum = sum + worker_pool.bit_idx(step - 1);
             pos = step;
         };
 
@@ -163,25 +163,22 @@ public(package) fun search(self: &WorkerPool, threshold: u64): u64 {
         i = i - 1;
     };
 
-    pos
+    worker_pool.key(pos)
 }
 
-public(package) fun add_stake(self: &mut WorkerPool, idx: u64, val: u64) {
-    assert!(idx < self.length, EIndexOutOfBounds);
-    let (slice, sub_idx) = self.idx_location_mut(idx);
-    let stake = vector::borrow_mut(&mut slice.stakes, sub_idx);
-    *stake = *stake + val;
-
-    self.add_bit_idx(idx, val);
+public(package) fun add_stake(worker_pool: &mut WorkerPool, idx: u64, val: u64) {
+    assert!(idx < worker_pool.length, EIndexOutOfBounds);
+    worker_pool.add_bit_idx(idx, val);
 }
 
-public(package) fun sub_stake(self: &mut WorkerPool, idx: u64, val: u64) {
-    assert!(idx < self.length, EIndexOutOfBounds);
-    let (slice, sub_idx) = self.idx_location_mut(idx);
-    let stake = vector::borrow_mut(&mut slice.stakes, sub_idx);
-    *stake = *stake - val;
+public(package) fun sub_stake(worker_pool: &mut WorkerPool, idx: u64, val: u64) {
+    assert!(idx < worker_pool.length, EIndexOutOfBounds);
+    worker_pool.sub_bit_idx(idx, val);
+}
 
-    self.sub_bit_idx(idx, val);
+public(package) fun key(worker_pool: &WorkerPool, idx: u64): address {
+    let (slice, sub_idx) = worker_pool.idx_location(idx);
+    slice.bit[sub_idx].key
 }
 
 // === Private Functions ===
@@ -203,51 +200,43 @@ fun idx_location_mut(self: &mut WorkerPool, idx: u64): (&mut Slice, u64) {
 
 fun bit_idx(self: &WorkerPool, idx: u64): u64 {
     let (slice, sub_idx) = self.idx_location(idx);
-    slice.bit[sub_idx]
-}
-
-fun change_stake_idx(self: &mut WorkerPool, idx: u64, addr: address, stake: u64): (address, u64) {
-    let (slice, sub_idx) = self.idx_location_mut(idx);
-    let address_slot = vector::borrow_mut(&mut slice.addresses, sub_idx);
-    let stake_slot = vector::borrow_mut(&mut slice.stakes, sub_idx);
-
-    let previous_addr = *address_slot;
-    let previous_stake = *stake_slot;
-
-    *address_slot = addr;
-    *stake_slot = stake;
-
-    (previous_addr, previous_stake)
+    slice.bit[sub_idx].value
 }
 
 fun add_bit_individual_idx(self: &mut WorkerPool, idx: u64, val: u64) {
     let (slice, sub_idx) = self.idx_location_mut(idx);
-    let bit_val = vector::borrow_mut(&mut slice.bit, sub_idx);
-    *bit_val = *bit_val + val;
+    slice.bit[sub_idx].value = slice.bit[sub_idx].value + val;
 }
 
 fun sub_bit_individual_idx(self: &mut WorkerPool, idx: u64, val: u64) {
     let (slice, sub_idx) = self.idx_location_mut(idx);
-    let bit_val = vector::borrow_mut(&mut slice.bit, sub_idx);
-    *bit_val = *bit_val - val;
+    slice.bit[sub_idx].value = slice.bit[sub_idx].value - val;
 }
 
-fun add_bit_idx(self: &mut WorkerPool, idx: u64, val: u64) {
+fun add_bit_idx(worker_pool: &mut WorkerPool, idx: u64, val: u64) {
     let mut i = idx + 1;
 
     while (i <= SIZE) {
-        add_bit_individual_idx(self, i - 1, val);
+        worker_pool.add_bit_individual_idx( i - 1, val);
 
         i = i + (i & (bitwise_not(i) + 1));
     }
 }
 
-fun sub_bit_idx(self: &mut WorkerPool, idx: u64, val: u64) {
+fun sub_bit_idx(worker_pool: &mut WorkerPool, idx: u64, val: u64) {
     let mut i = idx + 1;
 
     while (i <= SIZE) {
-        sub_bit_individual_idx(self, i - 1, val);
+        worker_pool.sub_bit_individual_idx( i - 1, val);
 
         i = i + (i & (bitwise_not(i) + 1));
     }
+}
+
+fun change_key(worker_pool: &mut WorkerPool, idx: u64, key: address): address {
+    let (slice, sub_idx) = worker_pool.idx_location_mut(idx);
+    let prev_key = slice.bit[sub_idx].key;
+    slice.bit[sub_idx].key = key;
+
+    prev_key
 }
