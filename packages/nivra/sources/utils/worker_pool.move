@@ -251,14 +251,3 @@ fun sub_bit_idx(self: &mut WorkerPool, idx: u64, val: u64) {
         i = i + (i & (bitwise_not(i) + 1));
     }
 }
-
-// === Test Functions ===
-#[test_only]
-public(package) fun destroy(self: WorkerPool) {
-    let WorkerPool {
-        id,
-        length: _,
-    } = self;
-
-    id.delete();
-}

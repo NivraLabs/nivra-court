@@ -1,115 +1,142 @@
 // © 2026 Nivra Labs Ltd.
 
-/// The Court module manages the lifecycle of disputes, including opening,
-/// updating, and resolution.
-/// 
-/// Users stake NVR tokens into a court to become eligible for juror selection.
-/// To accept dispute assignments, a staker must apply to the worker pool with
-/// their staked amount. Higher stake amounts increase the probability of being
-/// selected as a juror.
-/// 
-/// Any party may initiate a dispute by paying the required dispute fee against
-/// another party. Upon a dispute or appeal, the opposing party must match the
-/// fee; otherwise, the initiating party automatically prevails and is refunded.
-/// After a verdict is reached, the winning party is refunded according to the
-/// dispute outcome.
 module nivra::court;
 
 // === Imports ===
-use token::nvr::NVR;
-use nivra::{
-    court_registry::{create_metadata, CourtRegistry, NivraAdminCap},
-    constants::{
-        dispute_status_completed_one_sided,
-        dispute_status_cancelled,
-        dispute_status_completed,
-        current_version,
-    },
-    worker_pool::{WorkerPool, Self},
-    dispute::{
-        create_voter_details,
-        create_dispute,
-        VoterDetails,
-        Dispute,
-        PartyCap,
-    },
-    utils::bytes_lt,
-};
 use std::string::String;
-use sui::{
-    linked_table::{LinkedTable, borrow_mut, Self},
-    versioned::{Versioned, Self},
-    balance::{Balance, Self},
-    vec_map::{VecMap, Self},
-    random::{new_generator, Random},
-    table::{Table, Self},
-    vec_set::VecSet,
-    clock::Clock,
-    coin::Coin,
-    sui::SUI,
-    event,
-};
+use sui::table::{Self, Table};
+use sui::linked_table::{Self, LinkedTable};
+use nivra::worker_pool::{Self, WorkerPool};
+use sui::balance::{Self, Balance};
+use token::nvr::NVR;
+use sui::sui::SUI;
+use sui::coin::Coin;
+use sui::event;
+use nivra::constants::max_category_length;
+use nivra::constants::max_name_length;
+use nivra::constants::max_description_length;
+use nivra::registry::Registry;
+use sui::clock::Clock;
+use nivra::constants::max_appeals_limit;
+use nivra::constants::max_dispute_description_length;
+use nivra::constants::min_option_count;
+use nivra::constants::max_option_count;
+use nivra::constants::max_option_len;
+use sui::vec_map::{Self, VecMap};
+use nivra::constants::min_party_size;
+use nivra::constants::max_party_size;
+use nivra::dispute::create_dispute_schedule;
+use nivra::dispute::create_dispute_economics;
+use nivra::dispute::create_dispute_operation;
+use nivra::dispute::create_dispute;
+use nivra::dispute::Dispute;
+use sui::random::Random;
+use sui::random::new_generator;
+use nivra::constants::tie_nivster_count;
+use nivra::constants::status_active;
+use nivra::constants::status_halted;
+use nivra::vec_map_unsafe::{Self, VecMapUnsafe};
+use nivra::dispute::VoterDetails;
 
 // === Constants ===
 // Sanction models
 const FIXED_PERCENTAGE_MODEL: u64 = 0;
 const MINORITY_SCALED_MODEL: u64 = 1;
 const QUADRATIC_MODEL: u64 = 2;
-// Default dispute rules
-const TIE_NIVSTER_COUNT: u64 = 1;
-const MIN_OPTIONS: u64 = 2;
-const MAX_OPTIONS: u64 = 5;
-const PARTY_COUNT: u64 = 2;
-const MAX_APPEALS: u8 = 3;
-const MAX_DESCRIPTION_LEN: u64 = 2000;
-const MAX_OPTION_LEN: u64 = 255;
-const MAX_INIT_NIVSTERS: u64 = 11;
 
 // === Errors ===
-const EWrongVersion: u64 = 1;
-const EZeroDeposit: u64 = 2;
-const EDepositUnderMinStake: u64 = 3;
-const ENotOperational: u64 = 4;
-const EAlreadyInWorkerPool: u64 = 5;
-const ENotEnoughNVR: u64 = 6;
-const ENotEnoughSUI: u64 = 7;
-const ENoWithdrawAmount: u64 = 8;
-const ENotResponsePeriod: u64 = 9;
-const ENotInWorkerPool: u64 = 10;
-const EInvalidFee: u64 = 11;
-const EInvalidPartyCount: u64 = 12;
-const EInitiatorNotParty: u64 = 13;
-const EInvalidAppealCount: u64 = 14;
-const EDescriptionTooLong: u64 = 15;
-const EInvalidOptionsAmount: u64 = 16;
-const EDuplicateOptions: u64 = 17;
-const EOptionTooLong: u64 = 18;
-const EDisputeAlreadyExists: u64 = 19;
-const EInvalidPartyCap: u64 = 20;
-const ENotAppealPeriodTallied: u64 = 21;
-const ENoAppealsLeft: u64 = 22;
-const EWrongParty: u64 = 23;
-const ENotEnoughNivsters: u64 = 24;
-const EDisputeNotTie: u64 = 25;
-const EDisputeNotCompleted: u64 = 26;
-const EDisputeNotCancellable: u64 = 34;
-const EDisputeNotOneSided: u64 = 35;
-const EInvalidTreasuryShareInternal: u64 = 36;
-const EInvalidSanctionModelInternal: u64 = 37;
-const EInvalidCoefficientInternal: u64 = 38;
-const EZeroMinStakeInternal: u64 = 40;
-const EInvalidThresholdInternal: u64 = 41;
-const EInvalidKeyConfigInternal: u64 = 42;
-const ENotDrawPeriod: u64 = 43;
-const EOptionEmpty: u64 = 44;
-const ETooHighNivsterCount: u64 = 47;
-const EInvalidCoherenceReq: u64 = 48;
-const ENotEnoughRank: u64 = 49;
+const ENotOperational: u64 = 2;
+const EZeroDeposit: u64 = 3;
+const ETooLowReputation: u64 = 5;
+const EDepositUnderMinStake: u64 = 6;
+const ENotEnoughNVR: u64 = 7;
+const ENotEnoughSUI: u64 = 8;
+const ENoWithdrawAmount: u64 = 9;
+const ECategoryTooLong: u64 = 10;
+const ENameTooLong: u64 = 11;
+const EDescTooLong: u64 = 12;
+const EZeroMinStake: u64 = 13;
+const EInvalidReputationRequirement: u64 = 14;
+const EInvalidSanctionModel: u64 = 15;
+const EInvalidCoefficient: u64 = 16;
+const EInvalidTreasuryShare: u64 = 17;
+const EInvalidEmptyVotePenalty: u64 = 18;
+const EZeroInitNivsters: u64 = 19;
+const EZeroKeyServers: u64 = 20;
+const EInvalidKeyConfig: u64 = 21;
+const EInvalidThreshold: u64 = 22;
+const EAlreadyInWorkerPool: u64 = 23;
+const ENotInWorkerPool: u64 = 24;
+const EInvalidFee: u64 = 25;
+const EInvalidAppealCount: u64 = 27;
+const EDescriptionTooLong: u64 = 28;
+const ETooLittleOptions: u64 = 29;
+const ETooManyOptions: u64 = 30;
+const EOptionEmpty: u64 = 31;
+const EOptionTooLong: u64 = 32;
+const EInvalidPartySize: u64 = 33;
+const EInitiatorNotParty: u64 = 34;
+const EDisputeAlreadyExists: u64 = 35;
+const ENotResponsePeriod: u64 = 36;
+const ENotDisputeParty: u64 = 37;
+const EWrongParty: u64 = 38;
+const EInvalidCourt: u64 = 39;
+const ENotDrawPeriod: u64 = 40;
+const ENotEnoughNivsters: u64 = 41;
+const ENotAppealPeriodTallied: u64 = 42;
+const ENoAppealsLeft: u64 = 43;
+const EDisputeNotTie: u64 = 44;
+const EDisputeNotCancellable: u64 = 45;
+const EDisputeNotOneSided: u64 = 46;
+const EInvalidStatus: u64 = 49;
+const EDisputeNotCompleted: u64 = 50;
 
 // === Structs ===
-public enum Status has copy, drop, store {
-    Running,
-    Halted,
+public struct Court has key, store {
+    id: UID,
+    cases: Table<vector<u8>, ID>,
+    metadata: Metadata,
+    timetable: Timetable,
+    economics: Economics,
+    operation: Operation,
+    stakes: LinkedTable<address, Stake>,
+    worker_pool: WorkerPool,
+    stake_pool: Balance<NVR>,
+    reward_pool: Balance<SUI>,
+}
+
+public struct Metadata has copy, drop, store {
+    name: String,
+    category: String,
+    description: String,
+    ai_court: bool,
+}
+
+public struct Timetable has copy, drop, store {
+    response_period_ms: u64,
+    draw_period_ms: u64,
+    evidence_period_ms: u64,
+    voting_period_ms: u64,
+    appeal_period_ms: u64,
+}
+
+public struct Economics has copy, drop, store {
+    min_stake: u64,
+    reputation_requirement: u64,
+    init_nivster_count: u64,
+    sanction_model: u64,
+    coefficient: u64,
+    dispute_fee: u64,
+    treasury_share: u64,
+    treasury_share_nvr: u64,
+    empty_vote_penalty: u64,
+}
+
+public struct Operation has copy, drop, store {
+    status: u8,
+    key_servers: vector<address>,
+    public_keys: vector<vector<u8>>,
+    threshold: u8,
 }
 
 public struct Stake has drop, store {
@@ -119,228 +146,156 @@ public struct Stake has drop, store {
     worker_pool_pos: Option<u64>,
 }
 
-public struct DisputeDetails has drop, store {
-    dispute_id: ID,
-    depositors: VecMap<address, u64>,
-}
-
-public struct DefaultTimeTable has drop, store {
-    default_response_period_ms: u64,
-    default_draw_period_ms: u64,
-    default_evidence_period_ms: u64,
-    default_voting_period_ms: u64,
-    default_appeal_period_ms: u64,
-}
-
-public struct Court has key {
-    id: UID,
-    inner: Versioned,
-}
-
-public struct CourtInner has store {
-    allowed_versions: VecSet<u64>,
-    status: Status,
-    ai_court: bool,
-    coherence_req: u64,
-    init_nivster_count: u64,
-    sanction_model: u64,
-    coefficient: u64,
-    treasury_share: u64,
-    treasury_share_nvr: u64,
-    empty_vote_penalty: u64,
-    dispute_fee: u64,
-    min_stake: u64,
-    timetable: DefaultTimeTable,
-    cases: Table<ID, VecMap<vector<u8>, DisputeDetails>>,
-    stakes: LinkedTable<address, Stake>,
-    worker_pool: WorkerPool,
-    stake_pool: Balance<NVR>,
-    reward_pool: Balance<SUI>,
-    key_servers: vector<address>,
-    public_keys: vector<vector<u8>>,
-    threshold: u8,
-}
-
 // === Events ===
 public struct BalanceDepositEvent has copy, drop {
+    court: ID,
     nivster: address,
     amount_nvr: u64,
-    initial_deposit: bool,
 }
 
 public struct BalanceWithdrawalEvent has copy, drop {
+    court: ID,
     nivster: address,
     amount_nvr: u64,
     amount_sui: u64,
 }
 
-public struct BalanceRewardEvent has copy, drop {
+public struct BalanceLockedEvent has copy, drop {
+    court: ID,
     nivster: address,
-    amount_nvr: u64,
-    amount_sui: u64,
+    locked_nvr: u64,
+    dispute_id: ID,
+}
+
+public struct BalanceUnlockEvent has copy, drop {
+    court: ID,
+    nivster: address,
     unlocked_nvr: u64,
     dispute_id: ID,
 }
 
 public struct BalancePenaltyEvent has copy, drop {
+    court: ID,
     nivster: address,
     amount_nvr: u64,
     unlocked_nvr: u64,
     dispute_id: ID,
 }
 
+public struct BalanceRewardEvent has copy, drop {
+    court: ID,
+    nivster: address,
+    amount_nvr: u64,
+    amount_sui: u64,
+    unlocked_nvr: u64,
+    dispute_id: ID,
+}
+
 public struct WorkerPoolEvent has copy, drop {
+    court: ID,
     nivster: address,
     entry: bool,
 }
 
-public struct DisputeCreationEvent has copy, drop {
-    dispute_id: ID,
-    contract_id: ID,
-    court_id: ID,
-    initiator: address,
-    max_appeals: u8,
-    description: String,
-    parties: vector<address>,
-    options: vector<String>,
-    response_period_ms: u64,
-    draw_period_ms: u64,
-    evidence_period_ms: u64,
-    voting_period_ms: u64,
-    appeal_period_ms: u64,
-    sanction_model: u64,
-    coefficient: u64,
-    treasury_share: u64,
-    treasury_share_nvr: u64,
-    empty_vote_penalty: u64,
-    dispute_fee: u64,
-    key_servers: vector<address>,
-    public_keys: vector<vector<u8>>,
-    threshold: u8,
+public struct CourtCreatedEvent has copy, drop {
+    court: ID,
+    metadata: Metadata,
+    timetable: Timetable,
+    economics: Economics,
+    operation: Operation,
 }
 
-public struct DisputeAppealEvent has copy, drop {
-    dispute_id: ID,
-    initiator: address,
+public struct CourtMetadataChanged has copy, drop {
+    court: ID,
+    metadata: Metadata,
 }
 
-public struct DisputeAcceptEvent has copy, drop {
-    dispute_id: ID,
-    initiator: address,
+public struct CourtTimetableChanged has copy, drop {
+    court: ID,
+    timetable: Timetable,
 }
 
-public struct DisputeNivstersDrawnEvent has copy, drop {
-    dispute_id: ID,
-    initiator: address,
+public struct CourtEconomicsChanged has copy, drop {
+    court: ID,
+    economics: Economics,
 }
 
-public struct DisputeTieNivstersDrawnEvent has copy, drop {
-    dispute_id: ID,
-    initiator: address,
+public struct CourtOperationChanged has copy, drop {
+    court: ID,
+    operation: Operation,
 }
 
-public struct DisputeCancelEvent has copy, drop {
-    dispute_id: ID,
-    initiator: address,
-}
-
-public struct DisputeOneSidedCompletionEvent has copy, drop {
-    dispute_id: ID,
-    initiator: address,
-}
-
-public struct DisputeCompletionEvent has copy, drop {
-    dispute_id: ID,
-    initiator: address,
-}
-
-public struct NivsterSelectionEvent has copy, drop {
-    dispute_id: ID,
-    nivster: address,
-    reselected: bool,
-    locked_amount: u64,
-}
 // === Method Aliases ===
-use fun nivra::utils::do_ref as LinkedTable.do_ref;
+use fun nivra::vec_map::unique_values as VecMap.unique_values;
+use fun nivra::vec_map::do as VecMap.do;
 
 // === Public Functions ===
-/// Adds stake to the court.
 public fun stake(
-    self: &mut Court,
-    registry: &CourtRegistry,
+    court: &mut Court,
+    registry: &Registry,
     assets: Coin<NVR>, 
-    ctx: &mut TxContext
+    ctx: &mut TxContext,
 ) {
-    let self = self.load_inner_mut();
-    let deposit_amount = assets.value();
-    let sender = ctx.sender();
+    registry.validate_version();
+    assert!(court.operation.status == status_active(), ENotOperational);
 
-    assert!(self.status == Status::Running, ENotOperational);
+    let nivster_reputation = registry.nivster_reputation(ctx.sender());
+    assert!(
+        nivster_reputation >= court.economics.reputation_requirement, 
+        ETooLowReputation
+    );
+
+    let deposit_amount = assets.value();
     assert!(deposit_amount > 0, EZeroDeposit);
 
-    if (self.coherence_req > 0) {
-        let user_stats = registry.get_user_stats(sender);
-        let c_votes = user_stats.coherent_votes();
-        let i_votes = user_stats.incoherent_votes();
-        let vote_ratio = c_votes * 100 / (c_votes + i_votes);
-
-        assert!(vote_ratio >= self.coherence_req, ENotEnoughRank);
-    };
-
-    if (self.stakes.contains(sender)) {
-        let stake = self.stakes.borrow_mut(sender);
-
-        // Allow top-ups as long as the resulting stake meets the min stake.
-        assert!(
-            stake.amount + deposit_amount >= self.min_stake, 
-            EDepositUnderMinStake
-        );
-
-        stake.amount = stake.amount + deposit_amount;
-
-        // Automatically increase the worker pool stake.
-        if (stake.worker_pool_pos.is_some()) {
-            self.worker_pool.add_stake(
-                *stake.worker_pool_pos.borrow(), 
-                deposit_amount
-            );
-        };
-
-        event::emit(BalanceDepositEvent { 
-            nivster: sender, 
-            amount_nvr: deposit_amount,
-            initial_deposit: false,
-        });
-    } else {
-        assert!(deposit_amount >= self.min_stake, EDepositUnderMinStake);
-
-        self.stakes.push_back(sender, Stake {
-            amount: deposit_amount,
+    if (!court.stakes.contains(ctx.sender())) {
+        court.stakes.push_back(ctx.sender(), Stake {
+            amount: 0,
             locked_amount: 0,
             reward_amount: 0,
             worker_pool_pos: option::none(),
         });
-
-        event::emit(BalanceDepositEvent { 
-            nivster: sender, 
-            amount_nvr: deposit_amount, 
-            initial_deposit: true,
-        });
     };
 
-    self.stake_pool.join(assets.into_balance());
+    let stake = court.stakes.borrow_mut(ctx.sender());
+
+    assert!(
+        stake.amount + deposit_amount >= court.economics.min_stake, 
+        EDepositUnderMinStake
+    );
+
+    stake.amount = stake.amount + deposit_amount;
+
+    // Automatically join worker pool or increase the existing stake.
+    if (stake.worker_pool_pos.is_some()) {
+        court.worker_pool.add_stake(
+            *stake.worker_pool_pos.borrow(), 
+            deposit_amount
+        );
+    } else {
+        let pos = court.worker_pool.push_back(ctx.sender(), stake.amount);
+        stake.worker_pool_pos = option::some(pos);
+    };
+
+    court.stake_pool.join(assets.into_balance());
+
+    event::emit(BalanceDepositEvent {
+        court: object::id(court),
+        nivster: ctx.sender(),
+        amount_nvr: deposit_amount,
+    });
 }
 
 /// Withdraws available NVR stake and/or accumulated SUI rewards from the court.
 public fun withdraw(
-    self: &mut Court, 
+    court: &mut Court,
+    registry: &Registry,
     amount_nvr: u64,
     amount_sui: u64,
     ctx: &mut TxContext,
 ): (Coin<NVR>, Coin<SUI>) {
-    let self = self.load_inner_mut();
-    let sender = ctx.sender();
-    let stake = self.stakes.borrow_mut(sender);
+    registry.validate_version();
+    let stake = court.stakes.borrow_mut(ctx.sender());
 
     assert!(stake.amount >= amount_nvr, ENotEnoughNVR);
     assert!(stake.reward_amount >= amount_sui, ENotEnoughSUI);
@@ -353,18 +308,19 @@ public fun withdraw(
     if (stake.worker_pool_pos.is_some() && amount_nvr > 0) {
         let pos = *stake.worker_pool_pos.borrow();
 
-        if (stake.amount < self.min_stake) {
-            remove_from_worker_pool(self, sender, pos);
+        if (stake.amount >= court.economics.min_stake) {
+            court.worker_pool.sub_stake(pos, amount_nvr);
         } else {
-            self.worker_pool.sub_stake(pos, amount_nvr);
+            remove_from_worker_pool(court, ctx.sender(), pos);
         };
     };
 
-    let nvr = self.stake_pool.split(amount_nvr).into_coin(ctx);
-    let sui = self.reward_pool.split(amount_sui).into_coin(ctx);
+    let nvr = court.stake_pool.split(amount_nvr).into_coin(ctx);
+    let sui = court.reward_pool.split(amount_sui).into_coin(ctx);
 
     event::emit(BalanceWithdrawalEvent {
-        nivster: sender,
+        court: object::id(court),
+        nivster: ctx.sender(),
         amount_nvr,
         amount_sui,
     });
@@ -373,245 +329,160 @@ public fun withdraw(
 }
 
 /// Enrolls the caller into the worker pool.
-public fun join_worker_pool(self: &mut Court, ctx: &mut TxContext) {
-    let self = self.load_inner_mut();
-    let sender = ctx.sender();
-    let stake = self.stakes.borrow_mut(sender);
+public fun join_worker_pool(
+    court: &mut Court, 
+    registry: &Registry,
+    ctx: &mut TxContext
+) {
+    registry.validate_version();
+    assert!(court.operation.status == status_active(), ENotOperational);
 
-    assert!(self.status == Status::Running, ENotOperational);
-    assert!(stake.amount >= self.min_stake, ENotEnoughNVR);
+    let stake = court.stakes.borrow_mut(ctx.sender());
+    assert!(stake.amount >= court.economics.min_stake, ENotEnoughNVR);
     assert!(!stake.worker_pool_pos.is_some(), EAlreadyInWorkerPool);
-    
-    stake.worker_pool_pos = option::some(
-        self.worker_pool.push_back(sender, stake.amount)
-    );
+
+    let pos = court.worker_pool.push_back(ctx.sender(), stake.amount);
+    stake.worker_pool_pos = option::some(pos);
 
     event::emit(WorkerPoolEvent {
-        nivster: sender,
+        court: object::id(court),
+        nivster: ctx.sender(),
         entry: true,
     });
 }
 
 /// Removes the caller from the worker pool.
-public fun leave_worker_pool(self: &mut Court, ctx: &mut TxContext) {
-    let self = self.load_inner_mut();
-    let sender = ctx.sender();
-    let stake = self.stakes.borrow_mut(sender);
+public fun leave_worker_pool(
+    court: &mut Court,
+    registry: &Registry,
+    ctx: &mut TxContext
+) {
+    registry.validate_version();
 
+    let stake = court.stakes.borrow_mut(ctx.sender());
     assert!(stake.worker_pool_pos.is_some(), ENotInWorkerPool);
 
     remove_from_worker_pool(
-        self, 
-        sender, 
+        court, 
+        ctx.sender(), 
         *stake.worker_pool_pos.borrow()
     );
 
     event::emit(WorkerPoolEvent {
-        nivster: sender,
+        court: object::id(court),
+        nivster: ctx.sender(),
         entry: false,
     });
 }
 
-/// Opens a new dispute for a given contract.
 public fun open_dispute(
     court: &mut Court,
+    registry: &Registry,
     fee: Coin<SUI>,
     contract: ID,
     description: String,
-    parties: vector<address>,
     options: vector<String>,
+    parties: vector<address>,
     max_appeals: u8,
     clock: &Clock, 
     ctx: &mut TxContext
 ) {
-    let court_id = object::id(court);
-    let self = court.load_inner_mut();
+    registry.validate_version();
 
-    assert!(self.status == Status::Running, ENotOperational);
-    assert!(fee.value() == self.dispute_fee, EInvalidFee);
-    assert!(parties.length() == PARTY_COUNT, EInvalidPartyCount);
-    assert!(parties[0] != parties[1], EInvalidPartyCount);
-    assert!(parties.contains(&ctx.sender()), EInitiatorNotParty);
-    assert!(max_appeals <= MAX_APPEALS, EInvalidAppealCount);
-    assert!(description.length() <= MAX_DESCRIPTION_LEN, EDescriptionTooLong);
+    assert!(court.operation.status == status_active(), ENotOperational);
+    assert!(court.economics.dispute_fee == fee.value(), EInvalidFee);
+
+    // Dispute rules.
     assert!(
-        (options.length() == 0) ||
-            ((options.length() >= MIN_OPTIONS) && 
-                (options.length() <= MAX_OPTIONS)), 
-        EInvalidOptionsAmount
+        description.length() <= max_dispute_description_length(), 
+        EDescriptionTooLong
     );
+    assert!(max_appeals <= max_appeals_limit(), EInvalidAppealCount);
+    assert!(parties.contains(&ctx.sender()), EInitiatorNotParty);
+    assert!(options.length() >= min_option_count(), ETooLittleOptions);
+    assert!(options.length() <= max_option_count(), ETooManyOptions);
 
-    options.do_ref!(|option| {
+    options.do!(|option| {
         assert!(option.length() > 0, EOptionEmpty);
-        assert!(option.length() <= MAX_OPTION_LEN, EOptionTooLong);
+        assert!(option.length() <= max_option_len() as u64, EOptionTooLong);
     });
 
-    let mut parties_sorted = parties;
-    let mut options_sorted = options;
+    let options_mapping = vec_map::from_keys_values(
+        options, 
+        parties,
+    );
+    let parties = options_mapping.unique_values!();
 
-    parties_sorted.insertion_sort_by!(|a, b| (*a).to_u256() < (*b).to_u256());
-    options_sorted.insertion_sort_by!(|a, b| {
-        bytes_lt(a.as_bytes(), b.as_bytes())
-    });
+    assert!(parties.length() >= min_party_size(), EInvalidPartySize);
+    assert!(parties.length() <= max_party_size(), EInvalidPartySize);
 
-    let mut i = 1;
-
-    while (i < options_sorted.length()) {
-        assert!(options_sorted[i - 1] != options_sorted[i], EDuplicateOptions);
-        i = i + 1;
-    };
-
+    // Check if a dispute with the same configuration already exists.
     let serialized_config = serialize_dispute_config(
         contract, 
-        parties_sorted, 
-        options_sorted, 
-        max_appeals
+        options_mapping,
+        max_appeals,
     );
 
-    assert!(
-        !dispute_exists_for_contract(self, contract, &serialized_config), 
-        EDisputeAlreadyExists
-    );
+    assert!(!court.cases.contains(serialized_config), EDisputeAlreadyExists);
 
-    // NOTE: The dispute is initialized to start at response period.
+    // Create & register a new dispute.
     let dispute = create_dispute(
         contract,
-        court_id,
-        description,
-        self.timetable.default_response_period_ms,
-        self.timetable.default_draw_period_ms,
-        self.timetable.default_evidence_period_ms, 
-        self.timetable.default_voting_period_ms, 
-        self.timetable.default_appeal_period_ms, 
+        object::id(court), 
         max_appeals, 
-        parties,
-        options, 
-        self.key_servers, 
-        self.public_keys, 
-        self.threshold,
+        options_mapping, 
+        court.timetable.to_dispute_schedule_snapshot(clock), 
+        court.economics.to_dispute_economics_snapshot(), 
+        court.operation.to_dispute_operation_snapshot(),
         serialized_config,
-        self.dispute_fee,
-        self.sanction_model,
-        self.coefficient,
-        self.treasury_share,
-        self.treasury_share_nvr,
-        self.empty_vote_penalty,
-        self.init_nivster_count,
-        clock, 
-        ctx
+        clock,
+        ctx,
     );
 
-    let mut dispute_details = DisputeDetails {
-        dispute_id: object::id(&dispute),
-        depositors: vec_map::empty(),
-    };
-
-    dispute_details.depositors.insert(ctx.sender(), fee.value());
-
-    if (!self.cases.contains(contract)) {
-        self.cases.add(contract, vec_map::empty());
-    };
-
-    self.cases
-    .borrow_mut(contract)
-    .insert(serialized_config, dispute_details);
-
-    emit_dispute_creation(&dispute);
-
-    self.reward_pool.join(fee.into_balance());
-    dispute.share_dispute(ctx);
+    court.cases.add(serialized_config, object::id(&dispute));
+    court.reward_pool.join(fee.into_balance());
+    dispute.share_dispute();
 }
 
-/// Starts a new appeal round for an existing dispute.
-public fun open_appeal(
-    court: &mut Court,
-    dispute: &mut Dispute,
-    fee: Coin<SUI>,
-    cap: &PartyCap,
-    clock: &Clock,
-) {
-    assert!(object::id(dispute) == cap.dispute_id_party(), EInvalidPartyCap);
-    assert!(dispute.is_appeal_period_tallied(clock), ENotAppealPeriodTallied);
-    assert!(dispute.has_appeals_left(), ENoAppealsLeft);
-
-    let self = court.load_inner_mut();
-    let appeal_count = dispute.appeals_used() + 1;
-
-    let dispute_fee = dispute_fee(dispute.dispute_fee(), appeal_count);
-    assert!(fee.value() == dispute_fee, EInvalidFee);
-
-    let case = self.cases.borrow_mut(dispute.contract());
-    // NOTE: Both depositors must exist by now.
-    let deposit = case.get_mut(dispute.serialized_config())
-    .depositors
-    .get_mut(&cap.party());
-    *deposit = *deposit + fee.value();
-
-    self.reward_pool.join(fee.into_balance());
-
-    event::emit(DisputeAppealEvent { 
-        dispute_id: object::id(dispute), 
-        initiator: cap.party(),
-    });
-
-    dispute.register_payment_by_party(cap.party());
-    dispute.start_response_period_appeal(clock);
-}
-
-/// Accepts an open dispute or appeal by the opposing party and deposits
-/// the required response fee.
 public fun accept_dispute(
     court: &mut Court,
     dispute: &mut Dispute,
+    registry: &Registry,
     fee: Coin<SUI>,
-    cap: &PartyCap,
     clock: &Clock,
+    ctx: &mut TxContext,
 ) {
+    registry.validate_version();
+
     assert!(dispute.is_response_period(clock), ENotResponsePeriod);
-    assert!(object::id(dispute) == cap.dispute_id_party(), EInvalidPartyCap);
-    assert!(cap.party() != dispute.last_payment(), EWrongParty);
+    assert!(dispute.court() == object::id(court), EInvalidCourt);
+    assert!(dispute.is_party(ctx.sender()), ENotDisputeParty);
+    assert!(dispute.last_payer() != ctx.sender(), EWrongParty);
 
-    let self = court.load_inner_mut();
     let appeal_count = dispute.appeals_used();
-
     let dispute_fee = dispute_fee(dispute.dispute_fee(), appeal_count);
-    assert!(fee.value() == dispute_fee as u64, EInvalidFee);
 
-    let case = self.cases.borrow_mut(dispute.contract());
-    let depositors = &mut case
-    .get_mut(dispute.serialized_config())
-    .depositors;
+    assert!(fee.value() == dispute_fee, EInvalidFee);
 
-    if (!depositors.contains(&cap.party())) {
-        depositors.insert(cap.party(), fee.value());
-    } else {
-        let payer_balance = depositors.get_mut(&cap.party());
-        *payer_balance = *payer_balance + fee.value();
-    };
+    dispute.register_payment(fee.value(), ctx.sender(),clock);
+    court.reward_pool.join(fee.into_balance());
 
-    event::emit(DisputeAcceptEvent {
-        dispute_id: object::id(dispute),
-        initiator: cap.party(),
-    });
-
-    self.reward_pool.join(fee.into_balance());
-
-    dispute.register_payment_by_party(cap.party());
     dispute.start_draw_period(clock);
 }
 
-/// Draws nivsters for the round after both parties have accepted the case.
-entry fun draw_new_nivsters(
-    self: &mut Court,
+entry fun draw_nivsters(
+    court: &mut Court,
     dispute: &mut Dispute,
+    registry: &Registry,
     clock: &Clock,
     r: &Random,
     ctx: &mut TxContext,
 ) {
+    registry.validate_version();
+
+    assert!(dispute.court() == object::id(court), EInvalidCourt);
     assert!(dispute.is_draw_period(clock), ENotDrawPeriod);
 
-    let self = self.load_inner_mut();
-    let dispute_id = object::id(dispute);
     let appeal_count = dispute.appeals_used();
 
     // The nivster count grows by 2^(i-1) * (N + 1) on appeal rounds, where 
@@ -622,670 +493,731 @@ entry fun draw_new_nivsters(
         dispute.init_nivster_count()
     };
 
-    self.draw_nivsters(
-        dispute.voters_mut(), 
-        nivster_count, 
-        dispute_id,
+    random_nivster_selection(
+        court, 
+        dispute, 
+        nivster_count,
         r, 
         ctx
     );
 
-    event::emit(DisputeNivstersDrawnEvent { 
-        dispute_id, 
-        initiator: ctx.sender(), 
-    });
-
-    dispute.start_new_round(clock, ctx);
+    dispute.start_new_round(clock);
 }
 
-/// Handles dispute ties by drawing more nivsters and starting a new round.
+public fun open_appeal(
+    court: &mut Court,
+    dispute: &mut Dispute,
+    registry: &Registry,
+    fee: Coin<SUI>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    registry.validate_version();
+
+    assert!(dispute.court() == object::id(court), EInvalidCourt);
+    assert!(dispute.is_appeal_period_tallied(clock), ENotAppealPeriodTallied);
+    assert!(dispute.is_party(ctx.sender()), ENotDisputeParty);
+    assert!(dispute.has_appeals_left(), ENoAppealsLeft);
+
+    let appeal_count = dispute.appeals_used() + 1;
+
+    let dispute_fee = dispute_fee(dispute.dispute_fee(), appeal_count);
+    assert!(fee.value() == dispute_fee, EInvalidFee);
+
+    dispute.register_payment(fee.value(), ctx.sender(), clock);
+    court.reward_pool.join(fee.into_balance());
+
+    dispute.use_appeal();
+    dispute.start_response_period(clock);
+}
+
 entry fun handle_dispute_tie(
     court: &mut Court,
     dispute: &mut Dispute,
+    registry: &Registry,
     clock: &Clock,
     r: &Random,
     ctx: &mut TxContext,
 ) {
+    registry.validate_version();
+
+    assert!(dispute.court() == object::id(court), EInvalidCourt);
     assert!(dispute.is_appeal_period_tie(clock), EDisputeNotTie);
 
-    let court = court.load_inner_mut();
-    let dispute_id = object::id(dispute);
-    court.draw_nivsters(
-        dispute.voters_mut(), 
-        TIE_NIVSTER_COUNT, 
-        dispute_id,
+    random_nivster_selection(
+        court, 
+        dispute, 
+        tie_nivster_count(),
         r, 
         ctx
     );
 
-    event::emit(DisputeTieNivstersDrawnEvent { 
-        dispute_id,
-        initiator: ctx.sender(), 
-    });
-
-    dispute.start_new_round_tie(clock, ctx);
+    dispute.start_new_round_tie(clock);
 }
 
-/// Cancels a failed or abandoned dispute.
 public fun cancel_dispute(
     court: &mut Court,
     dispute: &mut Dispute,
-    court_registry: &mut CourtRegistry,
+    registry: &Registry,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
+    registry.validate_version();
+    assert!(dispute.court() == object::id(court), EInvalidCourt);
     assert!(dispute.is_incomplete(clock), EDisputeNotCancellable);
 
-    let self = court.load_inner_mut();
-    // Remove the case from the case map, so a new case can be opened 
-    // for the contract.
-    let (_, dispute_details) = self.cases
-    .borrow_mut(dispute.contract())
-    .remove(dispute.serialized_config());
-
-    // Refund parties
-    let mut i = 0;
-
-    while (i < dispute_details.depositors.length()) {
-        let (addr, amount) = dispute_details.depositors
-        .get_entry_by_idx(i);
-
-        transfer::public_transfer(
-            self.reward_pool.split(*amount).into_coin(ctx),
-            *addr
-        );
-
-        i = i + 1;
-    };
-
-    // Refund voters
     let dispute_id = object::id(dispute);
 
-    dispute.voters().do_ref!(|k, v| {
-        unlock_stake_with_penalty(
-            self,
-            court_registry,
-            k, 
-            v.stake(), 
-            0, 
-            dispute_id
+    // Remove the case from the case map, so a new case can be opened 
+    // for the contract.
+    court.cases.remove(dispute.config_hash());
+
+    // Refund the parties.
+    dispute.payments().do!(|party, payment_details| {
+        let total_deposit_amount = payment_details.fold!(0, |sum, deposit| {
+            sum + deposit.amount()
+        });
+
+        transfer::public_transfer(
+            court.reward_pool.split(total_deposit_amount).into_coin(ctx),
+            *party
+        );
+            
+        dispute.register_refund(total_deposit_amount, *party, clock);
+    });
+
+    // Refund the nivsters.
+    dispute.voters().for_each_ref!(|voter, voter_details| {
+        court.unlock_stake(
+            *voter, 
+            voter_details.stake(), 
+            dispute_id,
         );
     });
 
-    event::emit(DisputeCancelEvent { 
-        dispute_id,
-        initiator: ctx.sender(),
-    });
-
-    dispute.set_status(dispute_status_cancelled());
+    dispute.cancel_dispute(clock);
 }
 
-/// Resolves a one-sided dispute where one party failed to pay the required
-/// dispute or appeal fee within the allowed time window.
 public fun resolve_one_sided_dispute(
     court: &mut Court,
     dispute: &mut Dispute,
-    court_registry: &mut CourtRegistry,
+    registry: &mut Registry,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
+    registry.validate_version();
+    assert!(dispute.court() == object::id(court), EInvalidCourt);
     assert!(dispute.party_failed_payment(clock), EDisputeNotOneSided);
 
-    let self = court.load_inner_mut();
+    let winner_party = dispute.last_payer();
 
-    // The case is left to the case map intentionally, so that another case
-    // can't be opened for the contract with same configurations.
-    let dispute_details = self.cases.borrow(dispute.contract())
-        .get(dispute.serialized_config());
+    // Refund the winning party and calculate sui rewards size.
+    let mut winner_party_deposits = 0;
+    let mut lost_deposits = 0;
 
-    let winner_party = dispute.last_payment();
-    let refund_amount = dispute_details.depositors.get(&winner_party);
+    dispute.payments().do!(|party, payment_details| {
+        let total_deposit_amount = payment_details.fold!(0, |sum, deposit| {
+            sum + deposit.amount()
+        });
 
-    // Refund the winner party.
+        if (*party == winner_party) {
+            winner_party_deposits = total_deposit_amount;
+        } else {
+            lost_deposits = lost_deposits + total_deposit_amount;
+        };
+    });
+
     transfer::public_transfer(
-        self.reward_pool.split(*refund_amount).into_coin(ctx), 
+        court.reward_pool.split(winner_party_deposits).into_coin(ctx),
         winner_party
     );
+            
+    dispute.register_refund(winner_party_deposits, winner_party, clock);
 
-    let mut nivsters_take = 0;
-    let mut remaining_fees = 0;
+    // Calculate nvr rewards size & register penalties.
+    let winners = dispute.votes_for_party(winner_party);
+    let total_votes = dispute.total_votes_casted();
+    let mut penalties = 0;
+    let mut winner_stakes = 0;
+    let mut winner_nivsters: VecMapUnsafe<address, VoterDetails> = 
+        vec_map_unsafe::empty();
 
-    // Split fees paid by the other party to the nivsters and the treasury.
-    if (dispute.appeals_used() >= 1) {
-        let paid_rounds = dispute.appeals_used() - 1;
-        
-        remaining_fees = total_dispute_fee(
-            dispute.dispute_fee(), 
-            paid_rounds
+    dispute.voters().for_each_ref!(|voter, voter_details| {
+        let party_vote = voter_details.decrypted_vote_party(dispute);
+
+        if (party_vote.is_none()) {
+            let empty_vote_penalty = voter_details.stake() * 
+                dispute.empty_vote_penalty() / 100;
+
+            penalties = penalties + empty_vote_penalty;
+
+            court.unlock_stake_with_penalty(
+                registry, 
+                *voter, 
+                voter_details.stake(), 
+                empty_vote_penalty, 
+                object::id(dispute),
+            );
+        } else if (*party_vote.borrow() != winner_party) {
+            let incoherent_vote_penalty = penalty(
+                dispute.sanction_model(), 
+                dispute.coefficient(), 
+                voter_details.stake(), 
+                total_votes, 
+                winners
+            );
+
+            penalties = penalties + incoherent_vote_penalty;
+
+            court.unlock_stake_with_penalty(
+                registry, 
+                *voter, 
+                voter_details.stake(), 
+                incoherent_vote_penalty, 
+                object::id(dispute),
+            );
+        } else {
+            winner_stakes = winner_stakes + voter_details.stake();
+            winner_nivsters.insert_unsafe(*voter, *voter_details);
+        };
+    });
+
+    // Distribute rewards.
+    let treasury_nvr = 
+        (penalties as u128) * (dispute.treasury_share_nvr() as u128) / 100;
+
+    let treasury_sui = 
+        (lost_deposits as u128) * (dispute.treasury_share() as u128) / 100;
+
+    let nivster_share_nvr = (penalties as u128) - treasury_nvr;
+    let nivster_share_sui = (lost_deposits as u128) - treasury_sui;
+    
+    let mut remaining_nvr = penalties;
+    let mut remaining_sui = lost_deposits;
+
+    winner_nivsters.for_each_ref!(|voter, voter_details| {
+        // winner_stakes > 0, if winners exist.
+        let nvr_reward = if (winner_stakes > 0) {
+            nivster_share_nvr * (voter_details.stake() as u128) 
+                / (winner_stakes as u128)
+        } else { 0 };
+            
+        let sui_reward = if (winner_stakes > 0) {
+            nivster_share_sui * (voter_details.stake() as u128) 
+                / (winner_stakes as u128)
+        } else { 0 };
+
+        remaining_nvr = remaining_nvr - (nvr_reward as u64);
+        remaining_sui = remaining_sui - (sui_reward as u64);
+
+        court.unlock_stake_with_rewards(
+            registry, 
+            *voter, 
+            voter_details.stake(), 
+            nvr_reward as u64, 
+            sui_reward as u64, 
+            object::id(dispute),
         );
+    });
 
-        nivsters_take = nivsters_take(
-            dispute.dispute_fee(),
-            dispute.treasury_share(), 
-            paid_rounds, 
-            dispute.init_nivster_count()
+    // Collect treasury share.
+    if (remaining_nvr > 0) {
+        transfer::public_transfer(
+        court.stake_pool.split(remaining_nvr).into_coin(ctx),
+        registry.treasury_address()
         );
     };
 
-    let dispute_id = object::id(dispute);
-    let total_stake_sum = dispute.total_stake_sum();
-
-    dispute.voters().do_ref!(|k, v| {
-        // NOTE: min_stake is always > 0.
-        let reward = (nivsters_take as u128) * (v.stake() as u128) / 
-            (total_stake_sum as u128);
-        remaining_fees = remaining_fees - (reward as u64);
-
-        unlock_stake_with_rewards(
-            self,
-            court_registry,
-            k, 
-            v.stake(), 
-            0, 
-            (reward as u64), 
-            dispute_id
+    if (remaining_sui > 0) {
+        transfer::public_transfer(
+            court.reward_pool.split(remaining_sui).into_coin(ctx),
+            registry.treasury_address()
         );
-    });
-
-    // Protocol fee.
-    transfer::public_transfer(
-        self.reward_pool.split(remaining_fees).into_coin(ctx), 
-        court_registry.treasury_address()
-    );
-
-    event::emit(DisputeOneSidedCompletionEvent { 
-        dispute_id: object::id(dispute),
-        initiator: ctx.sender(),
-    });
-
-    dispute.send_results(ctx);
-    dispute.set_status(dispute_status_completed_one_sided());
+    };
+    
+    dispute.resolve_dispute_one_sided(ctx);
 }
 
-/// Finalizes a fully adjudicated dispute after voting and tallying have 
-/// completed.
 public fun complete_dispute(
     court: &mut Court,
     dispute: &mut Dispute,
-    court_registry: &mut CourtRegistry,
+    registry: &mut Registry,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
+    registry.validate_version();
+    assert!(dispute.court() == object::id(court), EInvalidCourt);
     assert!(dispute.is_completed(clock), EDisputeNotCompleted);
 
-    let self = court.load_inner_mut();
-    let idx = *dispute.winner_party().borrow() as u64;
-    let winner_party = dispute.parties()[idx];
-    // The case is left to the case map intentionally, so that another case
-    // can't be opened for the contract with same configurations.
-    let deposit = self.cases.borrow(dispute.contract())
-    .get(dispute.serialized_config())
-    .depositors
-    .get(&winner_party);
+    let winner_party = *dispute.winner_party().borrow();
 
-    // Refund the winner party.
+    // Refund the winning party and calculate sui rewards size.
+    let mut winner_party_deposits = 0;
+    let mut lost_deposits = 0;
+
+    dispute.payments().do!(|party, payment_details| {
+        let total_deposit_amount = payment_details.fold!(0, |sum, deposit| {
+            sum + deposit.amount()
+        });
+
+        if (*party == winner_party) {
+            winner_party_deposits = total_deposit_amount;
+        } else {
+            lost_deposits = lost_deposits + total_deposit_amount;
+        };
+    });
+
     transfer::public_transfer(
-        self.reward_pool.split(*deposit).into_coin(ctx), 
+        court.reward_pool.split(winner_party_deposits).into_coin(ctx),
         winner_party
     );
+            
+    dispute.register_refund(winner_party_deposits, winner_party, clock);
 
-    let nivsters_take = nivsters_take(
-        dispute.dispute_fee(), 
-        dispute.treasury_share(), 
-        dispute.appeals_used(), 
-        dispute.init_nivster_count()
-    );
-    let (penalties, majority_sum) = pentalties_and_majority(dispute);
+    // Calculate nvr rewards size and register penalties.
+    let winner_option = dispute.winner_option_idx();
+    let winners = dispute.votes_for_option(*winner_option.borrow());
+    let total_votes = dispute.total_votes_casted();
+    let mut penalties = 0;
+    let mut winner_stakes = 0;
+    let mut winner_nivsters: VecMapUnsafe<address, VoterDetails> = 
+        vec_map_unsafe::empty();
 
-    let mut remaining_penalties = penalties;
-    let mut remaining_fees = total_dispute_fee(
-        dispute.dispute_fee(), 
-        dispute.appeals_used()
-    );
+    dispute.voters().for_each_ref!(|voter, voter_details| {
+        let vote = voter_details.decrypted_vote();
 
-    let (total_votes, winner_option, winner_votes) = vote_params(dispute);
-    let dispute_id = object::id(dispute);
-    let party_vote = dispute.winner_option().is_none();
+        if (vote.is_none()) {
+            let empty_vote_penalty = voter_details.stake() * 
+                dispute.empty_vote_penalty() / 100;
+            
+            penalties = penalties + empty_vote_penalty;
 
-    dispute.voters().do_ref!(|k, v| {
-        let decrypted_vote = if (party_vote) {
-            v.decrypted_party_vote()
-        } else {
-            v.decrypted_vote()
-        };
+            court.unlock_stake_with_penalty(
+                registry, 
+                *voter, 
+                voter_details.stake(), 
+                empty_vote_penalty, 
+                object::id(dispute),
+            );
+        } else if (*vote.borrow() as u64 != *winner_option.borrow()) {
+            let discoherent_vote_penalty = penalty(
+                dispute.sanction_model(), 
+                dispute.coefficient(), 
+                voter_details.stake(), 
+                total_votes, 
+                winners
+            );
 
-        if (decrypted_vote.is_none()) {
-            unlock_stake_with_penalty(
-                self,
-                court_registry,
-                k, 
-                v.stake(), 
-                v.stake() * dispute.empty_vote_penalty() / 100, 
-                dispute_id
+            penalties = penalties + discoherent_vote_penalty;
+
+            court.unlock_stake_with_penalty(
+                registry, 
+                *voter, 
+                voter_details.stake(), 
+                discoherent_vote_penalty, 
+                object::id(dispute),
             );
         } else {
-            let vote = *decrypted_vote.borrow();
-
-            if (vote == winner_option) {
-                let sui_reward = (nivsters_take as u128) * 
-                    (v.stake() as u128) / (majority_sum as u128);
-                let nvr_reward = (penalties as u128) * (v.stake() as u128) * 
-                    (100 - (dispute.treasury_share_nvr() as u128)) / 
-                    (100 * (majority_sum as u128));
-                
-                remaining_fees = remaining_fees - (sui_reward as u64);
-                remaining_penalties = remaining_penalties - (nvr_reward as u64);
-
-                unlock_stake_with_rewards(
-                    self,
-                    court_registry,
-                    k, 
-                    v.stake(), 
-                    (nvr_reward as u64), 
-                    (sui_reward as u64), 
-                    dispute_id
-                );
-            } else {
-                unlock_stake_with_penalty(
-                    self,
-                    court_registry,
-                    k, 
-                    v.stake(), 
-                    penalty(
-                        dispute.sanction_model(), 
-                        dispute.coefficient(), 
-                        v.stake(), 
-                        total_votes, 
-                        winner_votes
-                    ), 
-                    dispute_id
-                );
-            };
+            winner_stakes = winner_stakes + voter_details.stake();
+            winner_nivsters.insert_unsafe(*voter, *voter_details);
         };
     });
 
-    // Protocol fees.
-    transfer::public_transfer(
-        self.reward_pool.split(remaining_fees).into_coin(ctx), 
-        court_registry.treasury_address()
-    );
-    transfer::public_transfer(
-        self.stake_pool.split(remaining_penalties).into_coin(ctx),
-        court_registry.treasury_address()
-    );
+    // Distribute rewards.
+    let treasury_nvr = 
+        (penalties as u128) * (dispute.treasury_share_nvr() as u128) / 100;
 
-    event::emit(DisputeCompletionEvent { 
-        dispute_id: object::id(dispute),
-        initiator: ctx.sender(),
+    let treasury_sui = 
+        (lost_deposits as u128) * (dispute.treasury_share() as u128) / 100;
+
+    let nivster_share_nvr = (penalties as u128) - treasury_nvr;
+    let nivster_share_sui = (lost_deposits as u128) - treasury_sui;
+    
+    let mut remaining_nvr = penalties;
+    let mut remaining_sui = lost_deposits;
+
+    winner_nivsters.for_each_ref!(|voter, voter_details| {
+        let nvr_reward = if (winner_stakes > 0) {
+            nivster_share_nvr * (voter_details.stake() as u128) 
+                / (winner_stakes as u128)
+        } else { 0 };
+            
+        let sui_reward = if (winner_stakes > 0) {
+            nivster_share_sui * (voter_details.stake() as u128) 
+                / (winner_stakes as u128)
+        } else { 0 };
+
+        remaining_nvr = remaining_nvr - (nvr_reward as u64);
+        remaining_sui = remaining_sui - (sui_reward as u64);
+
+        court.unlock_stake_with_rewards(
+            registry, 
+            *voter, 
+            voter_details.stake(), 
+            nvr_reward as u64, 
+            sui_reward as u64, 
+            object::id(dispute),
+        );
     });
 
-    dispute.send_results(ctx);
-    dispute.set_status(dispute_status_completed());
+    // Collect treasury share.
+    if (remaining_nvr > 0) {
+        transfer::public_transfer(
+        court.stake_pool.split(remaining_nvr).into_coin(ctx),
+        registry.treasury_address()
+        );
+    };
+
+    if (remaining_sui > 0) {
+        transfer::public_transfer(
+            court.reward_pool.split(remaining_sui).into_coin(ctx),
+            registry.treasury_address()
+        );
+    };
+
+    dispute.complete_dispute(ctx);
 }
 
-// === Admin Functions ===
-/// Creates a new court with metadata and registers it to the court registry.
-public fun create_court(
-    court_registry: &mut CourtRegistry,
-    cap: &NivraAdminCap,
-    ai_court: bool,
-    coherence_req: u64,
-    init_nivster_count: u64,
-    category: String,
+public fun create_metadata(
     name: String,
+    category: String,
     description: String,
-    skills: String,
+    ai_court: bool,
+): Metadata {
+    assert!(name.length() <= max_name_length(), ENameTooLong);
+    assert!(category.length() <= max_category_length(), ECategoryTooLong);
+    assert!(description.length() <= max_description_length(), EDescTooLong);
+
+    Metadata {
+        name,
+        category,
+        description,
+        ai_court,
+    }
+}
+
+public fun create_timetable(
+    response_period_ms: u64,
+    draw_period_ms: u64,
+    evidence_period_ms: u64,
+    voting_period_ms: u64,
+    appeal_period_ms: u64,
+): Timetable {
+    Timetable {
+        response_period_ms,
+        draw_period_ms,
+        evidence_period_ms,
+        voting_period_ms,
+        appeal_period_ms,
+    }
+}
+
+public fun to_dispute_schedule_snapshot(
+    timetable: &Timetable,
+    clock: &Clock,
+): nivra::dispute::Schedule {
+    create_dispute_schedule(
+        clock.timestamp_ms(), 
+        timetable.response_period_ms, 
+        timetable.draw_period_ms, 
+        timetable.evidence_period_ms, 
+        timetable.voting_period_ms, 
+        timetable.appeal_period_ms,
+    )
+}
+
+public fun create_economics(
+    min_stake: u64,
+    reputation_requirement: u64,
+    init_nivster_count: u64,
     sanction_model: u64,
     coefficient: u64,
+    dispute_fee: u64,
     treasury_share: u64,
     treasury_share_nvr: u64,
     empty_vote_penalty: u64,
-    dispute_fee: u64,
-    min_stake: u64,
-    default_response_period_ms: u64,
-    default_draw_period_ms: u64,
-    default_evidence_period_ms: u64,
-    default_voting_period_ms: u64,
-    default_appeal_period_ms: u64,
-    key_servers: vector<address>,
-    public_keys: vector<vector<u8>>,
-    threshold: u8,
-    ctx: &mut TxContext,
-): ID {
-    court_registry.validate_admin_privileges(cap);
-    assert!(treasury_share <= 100, EInvalidTreasuryShareInternal);
-    assert!(treasury_share_nvr <= 100, EInvalidTreasuryShareInternal);
-    assert!(empty_vote_penalty <= 100, EInvalidTreasuryShareInternal);
-    assert!(sanction_model < 3, EInvalidSanctionModelInternal);
-    assert!(min_stake > 0, EZeroMinStakeInternal);
-    assert!(init_nivster_count <= MAX_INIT_NIVSTERS, ETooHighNivsterCount);
-    assert!(coherence_req <= 100, EInvalidCoherenceReq);
+): Economics {
+    assert!(min_stake > 0, EZeroMinStake);
+    assert!(init_nivster_count > 0, EZeroInitNivsters);
+    assert!(sanction_model < 3, EInvalidSanctionModel);
+    assert!(reputation_requirement <= 100, EInvalidReputationRequirement);
+    assert!(coefficient <= 100, EInvalidCoefficient);
+    assert!(treasury_share <= 100, EInvalidTreasuryShare);
+    assert!(treasury_share_nvr <= 100, EInvalidTreasuryShare);
+    assert!(empty_vote_penalty <= 100, EInvalidEmptyVotePenalty);
 
-    // Seal limitations.
-    assert!(key_servers.length() == public_keys.length(), EInvalidKeyConfigInternal);
-    assert!(threshold > 0, EInvalidThresholdInternal);
-    assert!(threshold as u64 <= key_servers.length(), EInvalidThresholdInternal);
-
-    if (sanction_model == FIXED_PERCENTAGE_MODEL) {
-        assert!(coefficient < 100, EInvalidCoefficientInternal);
-    };
-
-    if (sanction_model == MINORITY_SCALED_MODEL || 
-        sanction_model == QUADRATIC_MODEL) {
-        assert!(coefficient <= 100, EInvalidCoefficientInternal);
-    };
-
-    let court_inner = CourtInner {
-        allowed_versions: court_registry.allowed_versions(),
-        status: Status::Running,
-        ai_court,
-        coherence_req,
+    Economics {
+        min_stake,
+        reputation_requirement,
         init_nivster_count,
         sanction_model,
         coefficient,
+        dispute_fee,
         treasury_share,
         treasury_share_nvr,
         empty_vote_penalty,
-        dispute_fee,
-        min_stake,
-        timetable: DefaultTimeTable {
-            default_response_period_ms,
-            default_draw_period_ms,
-            default_evidence_period_ms,
-            default_voting_period_ms,
-            default_appeal_period_ms,
-        },
+    }
+}
+
+public fun to_dispute_economics_snapshot(
+    economics: &Economics
+): nivra::dispute::Economics {
+    create_dispute_economics(
+        economics.init_nivster_count, 
+        economics.sanction_model, 
+        economics.coefficient, 
+        economics.dispute_fee, 
+        economics.treasury_share, 
+        economics.treasury_share_nvr, 
+        economics.empty_vote_penalty
+    )
+}
+
+public fun create_operation(
+    status: u8,
+    key_servers: vector<address>,
+    public_keys: vector<vector<u8>>,
+    threshold: u8,
+): Operation {
+    assert!(status <= status_halted(), EInvalidStatus);
+    assert!(key_servers.length() > 0, EZeroKeyServers);
+    assert!(key_servers.length() == public_keys.length(), EInvalidKeyConfig);
+    assert!(threshold as u64 <= key_servers.length(), EInvalidThreshold);
+
+    Operation {
+        status,
+        key_servers,
+        public_keys,
+        threshold,
+    }
+}
+
+public fun to_dispute_operation_snapshot(
+    operation: Operation,
+): nivra::dispute::Operation {
+    create_dispute_operation(
+        operation.key_servers, 
+        operation.public_keys, 
+        operation.threshold
+    )
+}
+
+// === Admin Functions ===
+public fun create_court(
+    registry: &mut Registry,
+    metadata: Metadata,
+    timetable: Timetable,
+    economics: Economics,
+    operation: Operation,
+    ctx: &mut TxContext,
+) {
+    registry.validate_admin_privileges(ctx);
+
+    let court = Court {
+        id: object::new(ctx),
         cases: table::new(ctx),
+        metadata,
+        timetable,
+        economics,
+        operation,
         stakes: linked_table::new(ctx),
         worker_pool: worker_pool::empty(ctx),
         stake_pool: balance::zero<NVR>(),
         reward_pool: balance::zero<SUI>(),
-        key_servers,
-        public_keys,
-        threshold,
     };
-
-    let court = Court { 
-        id: object::new(ctx), 
-        inner: versioned::create(
-            current_version(), 
-            court_inner, 
-            ctx
-        ),
-    };
-
     let court_id = object::id(&court);
-    let metadata = create_metadata(
-        category, 
-        name, 
-        description, 
-        skills,
-    );
 
-    court_registry.register_court(court_id, metadata);
+    registry.register_court(court_id);
     transfer::share_object(court);
 
-    court_id
+    event::emit(CourtCreatedEvent {
+        court: court_id,
+        metadata,
+        timetable,
+        economics,
+        operation,
+    });
 }
 
-/// Halts incoming operations to the court like staking, and opening disputes.
-public fun halt_operation(
-    self: &mut Court, 
-    cap: &NivraAdminCap, 
-    court_registry: &CourtRegistry
+public fun change_metadata(
+    court: &mut Court,
+    registry: &mut Registry,
+    metadata: Metadata,
+    ctx: &mut TxContext,
 ) {
-    court_registry.validate_admin_privileges(cap);
+    registry.validate_version();
+    registry.validate_admin_privileges(ctx);
 
-    let self = self.load_inner_mut();
-    self.status = Status::Halted;
-}
+    court.metadata = metadata;
 
-public fun start_operation(
-    self: &mut Court, 
-    cap: &NivraAdminCap, 
-    court_registry: &CourtRegistry
-) {
-    court_registry.validate_admin_privileges(cap);
-
-    let self = self.load_inner_mut();
-    self.status = Status::Running;
-}
-
-public fun change_dispute_fee(
-    self: &mut Court, 
-    cap: &NivraAdminCap, 
-    court_registry: &CourtRegistry,
-    dispute_fee: u64
-) {
-    court_registry.validate_admin_privileges(cap);
-
-    let self = self.load_inner_mut();
-    self.dispute_fee = dispute_fee;
-}
-
-public fun change_coherence_req(
-    self: &mut Court, 
-    cap: &NivraAdminCap, 
-    court_registry: &CourtRegistry,
-    coherence_req: u64
-) {
-    court_registry.validate_admin_privileges(cap);
-
-    let self = self.load_inner_mut();
-    self.coherence_req = coherence_req;
+    event::emit(CourtMetadataChanged { 
+        court: object::id(court), 
+        metadata,
+    });
 }
 
 public fun change_timetable(
-    self: &mut Court, 
-    cap: &NivraAdminCap, 
-    court_registry: &CourtRegistry,
-    default_response_period_ms: u64,
-    default_draw_period_ms: u64,
-    default_evidence_period_ms: u64,
-    default_voting_period_ms: u64,
-    default_appeal_period_ms: u64,
+    court: &mut Court,
+    registry: &mut Registry,
+    timetable: Timetable,
+    ctx: &mut TxContext,
 ) {
-    court_registry.validate_admin_privileges(cap);
+    registry.validate_version();
+    registry.validate_admin_privileges(ctx);
 
-    let self = self.load_inner_mut();
-    self.timetable.default_response_period_ms = default_response_period_ms;
-    self.timetable.default_draw_period_ms = default_draw_period_ms;
-    self.timetable.default_evidence_period_ms = default_evidence_period_ms;
-    self.timetable.default_voting_period_ms = default_voting_period_ms;
-    self.timetable.default_appeal_period_ms = default_appeal_period_ms;
+    court.timetable = timetable;
+
+    event::emit(CourtTimetableChanged { 
+        court: object::id(court), 
+        timetable,
+    });
 }
 
-public fun change_sanction_model(
-    self: &mut Court, 
-    cap: &NivraAdminCap, 
-    court_registry: &CourtRegistry,
-    sanction_model: u64,
-    coefficient: u64,
-    empty_vote_penalty: u64,
+public fun change_economics(
+    court: &mut Court,
+    registry: &mut Registry,
+    economics: Economics,
+    ctx: &mut TxContext,
 ) {
-    court_registry.validate_admin_privileges(cap);
+    registry.validate_version();
+    registry.validate_admin_privileges(ctx);
 
-    assert!(empty_vote_penalty <= 100, EInvalidSanctionModelInternal);
-    assert!(sanction_model < 3, EInvalidSanctionModelInternal);
+    court.economics = economics;
 
-    if (sanction_model == FIXED_PERCENTAGE_MODEL) {
-        assert!(coefficient < 100, EInvalidCoefficientInternal);
-    };
-
-    if (sanction_model == MINORITY_SCALED_MODEL || 
-        sanction_model == QUADRATIC_MODEL) {
-        assert!(coefficient <= 100, EInvalidCoefficientInternal);
-    };
-
-    let self = self.load_inner_mut();
-    self.sanction_model = sanction_model;
-    self.coefficient = coefficient;
-    self.empty_vote_penalty = empty_vote_penalty;
+    event::emit(CourtEconomicsChanged { 
+        court: object::id(court), 
+        economics,
+    });
 }
 
-public fun change_treasury_share(
-    self: &mut Court, 
-    cap: &NivraAdminCap, 
-    court_registry: &CourtRegistry,
-    treasury_share: u64,
-    treasury_share_nvr: u64,
+public fun change_operation(
+    court: &mut Court,
+    registry: &mut Registry,
+    operation: Operation,
+    ctx: &mut TxContext,
 ) {
-    court_registry.validate_admin_privileges(cap);
+    registry.validate_version();
+    registry.validate_admin_privileges(ctx);
 
-    assert!(treasury_share <= 100, EInvalidTreasuryShareInternal);
-    assert!(treasury_share_nvr <= 100, EInvalidTreasuryShareInternal);
+    court.operation = operation;
 
-    let self = self.load_inner_mut();
-    self.treasury_share = treasury_share;
-    self.treasury_share_nvr = treasury_share_nvr;
-}
-
-public fun change_min_stake(
-    self: &mut Court, 
-    cap: &NivraAdminCap, 
-    court_registry: &CourtRegistry,
-    min_stake: u64,
-) {
-    court_registry.validate_admin_privileges(cap);
-
-    assert!(min_stake > 0, EZeroMinStakeInternal);
-
-    let self = self.load_inner_mut();
-    self.min_stake = min_stake;
-}
-
-public fun change_key_servers(
-    self: &mut Court, 
-    cap: &NivraAdminCap, 
-    court_registry: &CourtRegistry,
-    key_servers: vector<address>,
-    public_keys: vector<vector<u8>>,
-    threshold: u8,
-) {
-    court_registry.validate_admin_privileges(cap);
-
-    assert!(
-        key_servers.length() == public_keys.length(), 
-        EInvalidKeyConfigInternal
-    );
-    assert!(threshold > 0, EInvalidThresholdInternal);
-    assert!(
-        threshold as u64 <= key_servers.length(), 
-        EInvalidThresholdInternal
-    );
-
-    let self = self.load_inner_mut();
-    self.key_servers = key_servers;
-    self.public_keys = public_keys;
-    self.threshold = threshold;
-}
-
-/// Updates court's package versions to match the court registry.
-public fun update_allowed_versions(
-    self: &mut Court,
-    cap: &NivraAdminCap,
-    court_registry: &CourtRegistry,
-) {
-    court_registry.validate_admin_privileges(cap);
-    let allowed_versions = court_registry.allowed_versions();
-    let inner: &mut CourtInner = self.inner.load_value_mut();
-    inner.allowed_versions = allowed_versions;
+    event::emit(CourtOperationChanged { 
+        court: object::id(court), 
+        operation, 
+    });
 }
 
 // === Package Functions ===
-/// Randomly selects jurors ("nivsters") from the worker pool for a case.
-/// 
-/// Selection is stake-weighted: each enrolled worker’s probability of being
-/// selected is proportional to their staked amount relative to the total stake
-/// in the worker pool.
-public(package) fun draw_nivsters(
-    self: &mut CourtInner, 
-    nivsters: &mut LinkedTable<address, VoterDetails>, 
+
+// === Private Functions ===
+fun remove_from_worker_pool(
+    court: &mut Court,
+    addr: address,
+    idx: u64,
+) {
+    let last_pos_idx = court.worker_pool.length() - 1;
+
+    // Update the position of the last staker in the worker pool
+    if (last_pos_idx != idx) {
+        let (last_pos_addr, _) = court.worker_pool.get_idx(last_pos_idx);
+        let last_staker = court.stakes.borrow_mut(last_pos_addr);
+        last_staker.worker_pool_pos = option::some(idx);
+    };
+
+    // Update the status and position of the removed staker.
+    let removed_staker = court.stakes.borrow_mut(addr);
+    removed_staker.worker_pool_pos = option::none();
+
+    // Perform the swap remove.
+    court.worker_pool.swap_remove(idx);
+}
+
+fun serialize_dispute_config(
+    contract_id: ID,
+    options: VecMap<String, address>,
+    max_appeals: u8,
+): vector<u8> {
+    // Configuration is serialized as:
+    // [contract_id][max_appeals][options_len][(len, option, address)...]
+    let mut serialized: vector<u8> = vector::empty();
+    serialized.append(contract_id.to_bytes());
+    serialized.push_back(max_appeals);
+    // NOTE: Max options length is 4.
+    serialized.push_back(options.length() as u8);
+
+    options.do!(|option, party| {
+        // NOTE: Max option length is 255.
+        serialized.push_back(option.length() as u8);
+        serialized.append(*option.as_bytes());
+        serialized.append(party.to_bytes());
+    });
+
+    // Hash the serialized config.
+    sui::hash::blake2b256(&serialized)
+}
+
+fun random_nivster_selection(
+    court: &mut Court,
+    dispute: &mut Dispute,
     nivster_count: u64,
-    dispute_id: ID,
     r: &Random,
     ctx: &mut TxContext,
 ) {
-    let potential_nivsters: u64 = self.worker_pool.length();
-    assert!(potential_nivsters >= nivster_count, ENotEnoughNivsters);
+    assert!(court.worker_pool.length() >= nivster_count, ENotEnoughNivsters);
 
-    let mut nivsters_selected = 0;
+    let mut nivsters_selected: vector<address> = vector[];
     let mut generator = new_generator(r, ctx);
-    let mut sum_stakes: u64 = self.worker_pool.prefix_sum(potential_nivsters - 1);
+    let mut sum = court.worker_pool.prefix_sum(court.worker_pool.length() - 1);
 
-    // Draw nivsters to nivsters list until nivster count is satisified.
-    while(nivsters_selected < nivster_count) {
-        // Randomly generate a threshold value T from [0, SUM_STAKES].
-        let selection_threshold = generator.generate_u64_in_range(0, sum_stakes);
-        // Find the first nivster n whose cumulative stake sum is >= T.
-        let wp_idx = self.worker_pool.search(selection_threshold);
-        let (n_addr, n_stake) = self.worker_pool.get_idx(wp_idx);
-        // Remove the nivster n from the worker pool to prevent duplicate selections.
-        remove_from_worker_pool(self, n_addr, wp_idx);
+    while (nivsters_selected.length() < nivster_count) {
+        let selection_threshold = generator.generate_u64_in_range(0, sum);
+        // Find the first nivster n whose cumulative stake sum is >= threshold.
+        let wp_idx = court.worker_pool.search(selection_threshold);
+        let (n_addr, n_stake) = court.worker_pool.get_idx(wp_idx);
 
-        // Load nivster's stake.
-        let nivster_stake = self.stakes.borrow_mut(n_addr);
-
-        // Lock the available stake amount up to court's min stake.
-        let locked_amount = if (nivster_stake.amount < self.min_stake) {
-            nivster_stake.amount
-        } else {
-            self.min_stake 
-        };
-
-        nivster_stake.amount = nivster_stake.amount - locked_amount;
-        nivster_stake.locked_amount = nivster_stake.locked_amount + locked_amount; 
-
-        if (nivsters.contains(n_addr)) {
-            // Nivster was already chosen in a previous draw, vote count is incremented by 1.
-            let nivster_details = nivsters.borrow_mut(n_addr);
-            nivster_details.increment_votes();
-            nivster_details.increase_stake(locked_amount);
-
-            event::emit(NivsterSelectionEvent { 
-                dispute_id, 
-                nivster: n_addr,
-                reselected: true,
-                locked_amount: locked_amount,
-            });
-        } else {
-            nivsters.push_back(n_addr, create_voter_details(
-                locked_amount
-            ));
-
-            event::emit(NivsterSelectionEvent { 
-                dispute_id, 
-                nivster: n_addr,
-                reselected: false,
-                locked_amount: locked_amount,
-            });
-        };
-
+        // Remove the n from the worker pool to prevent duplicate selections.
+        remove_from_worker_pool(court, n_addr, wp_idx);
         // Narrow the selection range by nivster's stake amount.
-        sum_stakes = sum_stakes - n_stake;
+        sum = sum - n_stake;
 
-        nivsters_selected = nivsters_selected + 1;
+        nivsters_selected.push_back(n_addr);
     };
+
+    nivsters_selected.do!(|nivster| {
+        let court_id = object::id(court);
+        let stake = court.stakes.borrow_mut(nivster);
+        let locked_amount = if (stake.amount < court.economics.min_stake) {
+            stake.amount
+        } else {
+            court.economics.min_stake
+        };
+
+        stake.amount = stake.amount - locked_amount;
+        stake.locked_amount = stake.locked_amount + locked_amount;
+
+        event::emit(BalanceLockedEvent {
+            court: court_id,
+            nivster,
+            locked_nvr: locked_amount,
+            dispute_id: object::id(dispute),
+        });
+
+        dispute.add_voter(nivster, locked_amount);
+
+        if (stake.amount >= court.economics.min_stake) {
+            let idx = court.worker_pool.push_back(nivster, stake.amount);
+            stake.worker_pool_pos = option::some(idx);
+        } else {
+            event::emit(WorkerPoolEvent {
+                court: object::id(court),
+                nivster,
+                entry: false,
+            });
+        };
+    });
 }
 
-public(package) fun load_inner_mut(self: &mut Court): &mut CourtInner {
-    let inner: &mut CourtInner = self.inner.load_value_mut();
-    let package_version = current_version();
-    assert!(inner.allowed_versions.contains(&package_version), EWrongVersion);
-
-    inner
-}
-
-public(package) fun load_inner(self: &Court): &CourtInner {
-    let inner: &CourtInner = self.inner.load_value();
-    let package_version = current_version();
-    assert!(inner.allowed_versions.contains(&package_version), EWrongVersion);
-
-    inner
-}
-
-/// Calculates dispute fee for the give round.
-public(package) fun dispute_fee(dispute_fee: u64, appeal_count: u8): u64 {
+fun dispute_fee(dispute_fee: u64, appeal_count: u8): u64 {
     let fee = std::u128::divide_and_round_up(
         dispute_fee as u128 * std::u128::pow(13, appeal_count), 
         std::u128::pow(5, appeal_count)
@@ -1294,58 +1226,7 @@ public(package) fun dispute_fee(dispute_fee: u64, appeal_count: u8): u64 {
     fee as u64
 }
 
-/// Calculates cumulative fee up to this round.
-public(package) fun total_dispute_fee(dispute_fee: u64, appeal_count: u8): u64 {
-    let mut sum = 0;
-    let mut i = 0;
-
-    while (i <= appeal_count) {
-        sum = sum + dispute_fee(dispute_fee, i);
-        i = i + 1;
-    };
-
-    sum
-}
-
-/// Calculates the total reward amount T that nivsters take from the deposited 
-/// sui fees. Rounds up the result in favor of nivsters.
-/// 
-/// `T(k) = F(n)(1 - a)[(2^(k + 1) - 1) + (2^(k + 1) - k - 2) / N]`
-/// 
-/// where:
-/// - `F(n)`: dispute fee
-/// - `a`: treasury_share in percentages scaled by 100
-/// - `k`: appeal count
-/// - `N`: initial nivster count
-public(package) fun nivsters_take(
-    dispute_fee: u64,
-    treasury_share: u64,
-    appeals: u8,
-    init_nivster_count: u64,
-): u64 {
-    let base = std::uq64_64::from_int(dispute_fee * (100 - treasury_share))
-    .div(std::uq64_64::from_int(100));
-
-    let step = std::u64::pow(2, appeals + 1);
-
-    let base_multiplier = std::uq64_64::from_int(step - 1)
-    .add(
-        std::uq64_64::from_int(step - (appeals as u64) - 2)
-        .div(std::uq64_64::from_int(init_nivster_count))
-    );
-
-    let result = base.mul(base_multiplier);
-    let result_int = result.to_int();
-
-    // Ceil.
-    if (result.gt(std::uq64_64::from_int(result_int))) {
-        result_int + 1
-    } else {
-        result_int
-    }
-}
-
-public(package) fun penalty(
+fun penalty(
     sanction_model: u64,
     coefficient: u64,
     staked_amount: u64,
@@ -1356,13 +1237,16 @@ public(package) fun penalty(
         return staked_amount * coefficient / 100
     };
 
+    // if total_votes == winner_votes, the penalty should never occurs for any 
+    // nivster.
     let minority_votes = total_votes - winner_votes;
 
     if (sanction_model == MINORITY_SCALED_MODEL && minority_votes > 0) {
         return staked_amount * coefficient / (minority_votes * 100)
     };
 
-    if (sanction_model == QUADRATIC_MODEL) {
+    // if total_votes == 0, the penalty should never occur for any nivster.
+    if (sanction_model == QUADRATIC_MODEL && total_votes > 0) {
         return (
             (staked_amount as u128) * (coefficient as u128) 
             * std::u128::pow(winner_votes as u128, 2) 
@@ -1373,169 +1257,57 @@ public(package) fun penalty(
     0
 }
 
-public(package) fun serialize_dispute_config(
-    contract_id: ID,
-    parties: vector<address>,
-    options: vector<String>,
-    max_appeals: u8,
-): vector<u8> {
-    let mut serialized: vector<u8> = vector::empty();
-
-    serialized.append(object::id_to_bytes(&contract_id));
-    parties.do!(|addr| serialized.append(addr.to_bytes()));
-    // NOTE: max options.length() = 5.
-    serialized.push_back(options.length() as u8);
-    // NOTE: max option.length() = 255.
-    options.do!(|option| {
-        serialized.push_back(option.length() as u8);
-        serialized.append(option.into_bytes());
-    });
-    serialized.push_back(max_appeals);
-
-    sui::hash::blake2b256(&serialized)
-}
-
-// === Private Functions ===
-fun dispute_exists_for_contract(
-    self: &CourtInner,
-    contract_id: ID,
-    serialized_config: &vector<u8>,
-): bool {
-    if (!self.cases.contains(contract_id)) {
-        false
-    } else {
-        let case = self.cases.borrow(contract_id);
-
-        case.contains(serialized_config)
-    }
-}
-
-fun remove_from_worker_pool(
-    self: &mut CourtInner,
-    addr: address,
-    idx: u64,
+fun unlock_stake(
+    court: &mut Court,
+    key: address, 
+    amount: u64,
+    dispute_id: ID,
 ) {
-    let last_pos_idx = self.worker_pool.length() - 1;
+    let stake = court.stakes.borrow_mut(key);
+            
+    stake.amount = stake.amount + amount;
+    stake.locked_amount = stake.locked_amount - amount;
 
-    // Update the position of the last staker in the worker pool
-    if (last_pos_idx != idx) {
-        let (last_pos_addr, _) = self.worker_pool.get_idx(last_pos_idx);
-        let last_staker = self.stakes.borrow_mut(last_pos_addr);
-        last_staker.worker_pool_pos = option::some(idx);
+    if (stake.worker_pool_pos.is_some()) {
+        court.worker_pool.add_stake(
+            *stake.worker_pool_pos.borrow(), 
+            amount,
+        );
     };
 
-    // Update the status and position of the removed staker.
-    let removed_staker = self.stakes.borrow_mut(addr);
-    removed_staker.worker_pool_pos = option::none();
-
-    // Perform the swap remove.
-    self.worker_pool.swap_remove(idx);
-}
-
-fun emit_dispute_creation(dispute: &Dispute) {
-    event::emit(DisputeCreationEvent {
-        dispute_id: object::id(dispute),
-        contract_id: dispute.contract(),
-        court_id: dispute.court(),
-        initiator: dispute.inititator(),
-        max_appeals: dispute.max_appeals(),
-        description: dispute.description(),
-        parties: dispute.parties(),
-        options: dispute.options(),
-        response_period_ms: dispute.response_period_ms(),
-        draw_period_ms: dispute.draw_period_ms(),
-        evidence_period_ms: dispute.evidence_period_ms(),
-        voting_period_ms: dispute.voting_period_ms(),
-        appeal_period_ms: dispute.appeal_period_ms(),
-        sanction_model: dispute.sanction_model(),
-        coefficient: dispute.coefficient(),
-        treasury_share: dispute.treasury_share(),
-        treasury_share_nvr: dispute.treasury_share_nvr(),
-        empty_vote_penalty: dispute.empty_vote_penalty(),
-        dispute_fee: dispute.dispute_fee(),
-        key_servers: dispute.key_servers(),
-        public_keys: dispute.public_keys(),
-        threshold: dispute.threshold(),
+    event::emit(BalanceUnlockEvent {
+        court: object::id(court),
+        nivster: key,
+        unlocked_nvr: amount,
+        dispute_id,
     });
-}
-
-fun vote_params(dispute: &Dispute): (u64, u8, u64) {
-    let party_vote = dispute.winner_option().is_none();
-
-    if (party_vote) {
-        let total_votes = dispute.total_votes_party();
-        let winner_party = *dispute.winner_party().borrow();
-        let winner_votes = dispute.party_result()[winner_party as u64];
-        (total_votes, winner_party, winner_votes)
-    } else {
-        let total_votes = dispute.total_votes_option();
-        let winner_option = *dispute.winner_option().borrow();
-        let winner_votes = dispute.result()[winner_option as u64];
-        (total_votes, winner_option, winner_votes)
-    }
-}
-
-fun pentalties_and_majority(dispute: &Dispute): (u64, u64) {
-    let party_vote = dispute.winner_option().is_none();
-    let mut p = 0;
-    let mut s = 0;
-
-    let (total_votes, winner_option, winner_votes) = 
-        vote_params(dispute);
-        
-    dispute.voters().do_ref!(|_, v| {
-        let decrypted_vote = if (party_vote) {
-            v.decrypted_party_vote()
-        } else {
-            v.decrypted_vote()
-        };
-
-        if (decrypted_vote.is_none()) {
-            p = p + v.stake() * dispute.empty_vote_penalty() / 100;
-        } else {
-            let vote = *decrypted_vote.borrow();
-
-            if (vote == winner_option) {
-                s = s + v.stake();
-            } else {
-                p = p + penalty(
-                    dispute.sanction_model(), 
-                    dispute.coefficient(), 
-                    v.stake(), 
-                    total_votes, 
-                    winner_votes
-                );
-            }
-        };
-    });
-
-    (p, s)
 }
 
 fun unlock_stake_with_penalty(
-    self: &mut CourtInner,
-    registry: &mut CourtRegistry,
-    key: address, 
+    court: &mut Court,
+    registry: &mut Registry,
+    nivster: address,
     amount: u64,
     penalty: u64,
     dispute_id: ID,
 ) {
-    let stake = self.stakes.borrow_mut(key);
+    let stake = court.stakes.borrow_mut(nivster);
 
     stake.amount = stake.amount + amount - penalty;
     stake.locked_amount = stake.locked_amount - amount;
 
     if (stake.worker_pool_pos.is_some()) {
-        self.worker_pool.add_stake(
+        court.worker_pool.add_stake(
             *stake.worker_pool_pos.borrow(), 
             amount - penalty,
         );
     };
 
-    registry.account_incoherent_vote(key, penalty);
+    registry.register_case_lost(nivster, penalty);
 
     event::emit(BalancePenaltyEvent {
-        nivster: key,
+        court: object::id(court),
+        nivster: nivster,
         amount_nvr: penalty,
         unlocked_nvr: amount,
         dispute_id,
@@ -1543,35 +1315,35 @@ fun unlock_stake_with_penalty(
 }
 
 fun unlock_stake_with_rewards(
-    self: &mut CourtInner, 
-    registry: &mut CourtRegistry,
-    key: address, 
+    court: &mut Court, 
+    registry: &mut Registry,
+    nivster: address,
     amount: u64,
     reward_nvr: u64,
     reward_sui: u64,
     dispute_id: ID,
 ) {
-    let stake = self.stakes.borrow_mut(key);
+    let stake = court.stakes.borrow_mut(nivster);
 
     stake.amount = stake.amount + amount + reward_nvr;
     stake.locked_amount = stake.locked_amount - amount;
     stake.reward_amount = stake.reward_amount + reward_sui;
 
     if (stake.worker_pool_pos.is_some()) {
-        self.worker_pool.add_stake(
+        court.worker_pool.add_stake(
             *stake.worker_pool_pos.borrow(), 
             amount + reward_nvr,
         );
     };
 
-    registry.account_coherent_vote(key, reward_nvr, reward_sui);
+    registry.register_case_won(nivster, reward_nvr, reward_sui);
 
     event::emit(BalanceRewardEvent {
-        nivster: key,
+        court: object::id(court),
+        nivster: nivster,
         amount_nvr: reward_nvr,
         amount_sui: reward_sui,
         unlocked_nvr: amount,
         dispute_id,
     });
 }
-// === Test Functions ===
