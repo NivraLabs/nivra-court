@@ -94,7 +94,7 @@ public fun load_balance(
 // === Admin Functions ===
 public fun change_daily_claim_amount(
     faucet: &mut NVRFaucet,
-    cap: &NVRFaucetAdminCap,
+    _cap: &NVRFaucetAdminCap,
     daily_claim_amount: u64,
 ) {
     faucet.daily_claim_amount = daily_claim_amount;
