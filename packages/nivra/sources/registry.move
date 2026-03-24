@@ -23,7 +23,7 @@ const NIVRA_PROTOCOL: address =
 const RASMUS: address = 
     @0x1;
 const ELMERI: address = 
-    @0x2;
+    @0x0eb4bdaf7b57fc5a7cdaf88c3187c4289ed5f2794e8ba87de82a05c859cebbc9;
 const PATRIK: address = 
     @0x3;
 const LUKA: address = 

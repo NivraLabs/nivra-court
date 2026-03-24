@@ -1,5 +1,0 @@
-[package]
-name = "contract_kit"
-edition = "2024"
-
-[dependencies]
