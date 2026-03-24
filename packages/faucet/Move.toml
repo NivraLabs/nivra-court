@@ -1,6 +1,0 @@
-[package]
-name = "faucet"
-edition = "2024"
-
-[dependencies]
-nvr = { local = "../nvr" }

@@ -1,0 +1,6 @@
+[package]
+name = "testnet_faucet"
+edition = "2024"
+
+[dependencies]
+nvr = { git = "https://github.com/NivraLabs/nivra-court.git", subdir = "packages/nvr", rev = "main" }
