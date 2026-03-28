@@ -1,7 +1,14 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 
 members = [
     "crates/indexer",
     "crates/schema",
 ]
+
+[workspace.dependencies]
+tokio = "1.50.0"
+serde = "1.0.228"
+diesel = "2.3.7"
+diesel-async = "0.8.0"
+diesel_migrations = "2.3.1"
