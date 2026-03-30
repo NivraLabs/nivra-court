@@ -28,6 +28,9 @@ use nivra::constants::dispute_status_cancelled;
 use nivra::constants::dispute_refund;
 use nivra::constants::dispute_status_completed_one_sided;
 use nivra::constants::dispute_status_completed;
+use nivra::constants::dispute_status_censored;
+use nivra::registry::Registry;
+use std::unit_test::assert_eq;
 
 // === Constants ===
 // Dispute cancellation reasons.
@@ -48,6 +51,7 @@ const EInvalidDerivedKeyAmount: u64 = 9;
 const ENotEnoughKeys: u64 = 10;
 const EAlreadyFinalized: u64 = 11;
 const EInvalidOption: u64 = 12;
+const EDisputeAlreadyResolved: u64 = 13;
 
 // === Structs ===
 public struct Dispute has key {
@@ -436,7 +440,9 @@ public fun is_incomplete(dispute: &Dispute, clock: &Clock): bool {
     let no_nivsters_drawn = (current_time > draw_period_end) && 
         (dispute.status == dispute_status_draw());
 
-    no_nivsters_drawn || untallied_or_unresolved_tie
+    let censored = dispute.status == dispute_status_censored();
+
+    no_nivsters_drawn || untallied_or_unresolved_tie || censored
 }
 
 public fun party_failed_payment(dispute: &Dispute, clock: &Clock): bool {
@@ -597,6 +603,25 @@ public fun parties(dispute: &Dispute): vector<address> {
 
 public fun winner_option_idx(dispute: &Dispute): Option<u64> {
     dispute.winner_option
+}
+
+// === Admin Functions ===
+public fun censor_dispute(
+    dispute: &mut Dispute,
+    registry: &Registry,
+    ctx: &mut TxContext,
+) {
+    assert!(
+        dispute.status != dispute_status_cancelled() &&
+        dispute.status != dispute_status_completed_one_sided() &&
+        dispute.status != dispute_status_completed(), 
+        EDisputeAlreadyResolved
+    );
+
+    registry.validate_version();
+    registry.validate_admin_privileges(ctx);
+
+    dispute.status = dispute_status_censored();
 }
 
 // === Package Functions ===

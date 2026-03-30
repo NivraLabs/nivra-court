@@ -32,6 +32,7 @@ const DISPUTE_STATUS_TALLIED: u64 = 5;
 const DISPUTE_STATUS_COMPLETED: u64 = 6;
 const DISPUTE_STATUS_COMPLETED_ONE_SIDED: u64 = 7;
 const DISPUTE_STATUS_CANCELLED: u64 = 8;
+const DISPUTE_STATUS_CENSORED: u64 = 9;
 
 // Dispute rules.
 const MAX_APPEALS_LIMIT: u8 = 3;
@@ -243,4 +244,8 @@ public fun change_treasury_vote(): u8 {
 
 public fun change_threshold_vote(): u8 {
     CHANGE_THRESHOLD_VOTE
+}
+
+public fun dispute_status_censored(): u64 {
+    DISPUTE_STATUS_CENSORED
 }

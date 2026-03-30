@@ -126,6 +126,7 @@ pub enum DisputeStatus {
     Completed = 6,
     CompletedOneSided = 7,
     Cancelled = 8,
+    Censored = 9,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, AsExpression, FromSqlRow)]
