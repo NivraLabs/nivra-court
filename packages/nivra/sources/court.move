@@ -1208,8 +1208,7 @@ fun random_nivster_selection(
         court.remove_from_worker_pool(nivster, stake_in_pool);
 
         // Narrow the selection range by nivster's stake amount.
-        let stake = court.stakes.borrow(nivster);
-        sum = sum - stake.amount;
+        sum = sum - stake_in_pool;
 
         nivsters_selected.push_back(nivster);
     };
