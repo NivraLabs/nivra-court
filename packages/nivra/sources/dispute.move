@@ -186,6 +186,10 @@ public struct DisputeCompleted has copy, drop {
     winner_option: String,
 }
 
+public struct DisputeCensoredEvent has copy, drop {
+    dispute: ID,
+}
+
 // === Method Aliases ===
 use fun nivra::vec_map::most_significant_option_idx as VecMap.mso_idx;
 use fun nivra::vec_map::unique_values as VecMap.unique_values;
@@ -622,6 +626,10 @@ public fun censor_dispute(
     registry.validate_admin_privileges(ctx);
 
     dispute.status = dispute_status_censored();
+
+    event::emit(DisputeCensoredEvent {
+        dispute: object::id(dispute),
+    });
 }
 
 // === Package Functions ===
