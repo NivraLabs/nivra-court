@@ -7,8 +7,11 @@ members = [
 ]
 
 [workspace.dependencies]
-tokio = "1.50.0"
+tokio = "1.49.0"
 serde = "1.0.228"
-diesel = "2.3.7"
-diesel-async = "0.8.0"
-diesel_migrations = "2.3.1"
+clap = "4.6.0"
+diesel = "2.2.12"
+diesel-async = "0.5.2"
+diesel_migrations = "2.2.0"
+anyhow = "1.0.102"
+chrono = "0.4.39"

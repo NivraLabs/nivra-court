@@ -1,6 +1,20 @@
 [package]
-name = "indexer"
+name = "nivra-indexer"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+tokio = { workspace = true, features = ["full"] }
+clap = { workspace = true, features = ["env", "derive"] }
+diesel = { workspace = true, features = ["postgres", "chrono"] }
+diesel-async = { workspace = true, features = ["bb8", "postgres"] }
+chrono.workspace = true
+anyhow.workspace = true
+
+sui-indexer-alt-framework = { git = "https://github.com/MystenLabs/sui.git", branch = "testnet" }
+sui-pg-db = { git = "https://github.com/MystenLabs/sui.git", branch = "testnet" }
+url = "2.5.4"
+
+[[bin]]
+name = "nivra-indexer"
+path = "src/main.rs"

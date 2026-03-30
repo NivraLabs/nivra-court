@@ -7,4 +7,4 @@ edition = "2024"
 diesel = { workspace = true, features = ["postgres", "64-column-tables", "chrono"] }
 diesel_migrations.workspace = true
 serde = { workspace = true }
-chrono = "0.4.44"
+chrono.workspace = true

@@ -1,14 +1,21 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+use url::Url;
+
+
+pub const MAINNET_REMOTE_STORE_URL: &str = "https://checkpoints.mainnet.sui.io";
+pub const TESTNET_REMOTE_STORE_URL: &str = "https://checkpoints.testnet.sui.io";
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum NivraEnv {
+    Mainnet,
+    Testnet,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+impl NivraEnv {
+    pub fn remote_store_url(&self) -> Url {
+        let url = match self {
+            NivraEnv::Mainnet => MAINNET_REMOTE_STORE_URL,
+            NivraEnv::Testnet => TESTNET_REMOTE_STORE_URL,
+        };
+        Url::parse(url).unwrap()
     }
 }
