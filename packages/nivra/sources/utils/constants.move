@@ -14,6 +14,12 @@ const MIN_VOTE_DECAY_MS: u64 = 15768000000; // 6 months
 // Admin vote rules.
 const MAX_ADMIN_DESC_LENGTH: u64 = 2000;
 
+// Admin vote event types.
+const ADD_ADMIN_VOTE: u8 = 1;
+const BLACKLIST_ADMIN_VOTE: u8 = 2;
+const CHANGE_TREASURY_VOTE: u8 = 3;
+const CHANGE_THRESHOLD_VOTE: u8 = 4;
+
 // Nivster rules.
 const REPUTATION_THRESHOLD: u64 = 3;
 
@@ -221,4 +227,20 @@ public fun max_voter_count(): u64 {
 
 public fun max_init_nivster_count(): u64 {
     MAX_INIT_NIVSTER_COUNT
+}
+
+public fun add_admin_vote(): u8 {
+    ADD_ADMIN_VOTE
+}
+
+public fun blacklist_admin_vote(): u8 {
+    BLACKLIST_ADMIN_VOTE
+}
+
+public fun change_treasury_vote(): u8 {
+    CHANGE_TREASURY_VOTE
+}
+
+public fun change_threshold_vote(): u8 {
+    CHANGE_THRESHOLD_VOTE
 }

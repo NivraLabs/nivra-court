@@ -15,6 +15,10 @@ use nivra::constants::min_vote_threshold;
 use sui::clock::Clock;
 use nivra::constants::min_vote_decay_ms;
 use nivra::constants::reputation_threshold;
+use nivra::constants::add_admin_vote;
+use nivra::constants::blacklist_admin_vote;
+use nivra::constants::change_treasury_vote;
+use nivra::constants::change_threshold_vote;
 
 // === Constants ===
 // Founder members.
@@ -105,44 +109,11 @@ public struct ThresholdUpdateVote has key {
 // === Events ===
 public struct AdminVoteEvent has copy, drop {
     vote: ID,
-    admin: address,
-    description: String,
-    initiator: address,
+    vote_type: u8,
 }
 
-public struct BlacklistVoteEvent has copy, drop {
+public struct AdminVoteFinalizedEvent has copy, drop {
     vote: ID,
-    admin: address,
-    description: String,
-    initiator: address,
-}
-
-public struct TreasuryVoteEvent has copy, drop {
-    vote: ID,
-    treasury: address,
-    description: String,
-    initiator: address,
-}
-
-public struct ThresholdVoteEvent has copy, drop {
-    vote: ID,
-    threshold: u64,
-    description: String,
-    initiator: address,
-}
-
-public struct AdminAddedEvent has copy, drop {
-    admin: address,
-    vote: Option<ID>,
-}
-
-public struct AdminBlacklistedEvent has copy, drop {
-    admin: address,
-    vote: ID,
-}
-
-public struct CourtUnregisteredEvent has copy, drop {
-    court: ID,
 }
 
 // === Public Functions ===
@@ -166,13 +137,6 @@ fun init(ctx: &mut TxContext) {
     };
 
     transfer::share_object(registry);
-
-    admin_whitelist.do!(|founder| {
-        event::emit(AdminAddedEvent { 
-            admin: founder, 
-            vote: option::none(),
-        });
-    });
 }
 
 public fun validate_version(registry: &Registry) {
@@ -249,9 +213,7 @@ public fun suggest_admin(
 
     event::emit(AdminVoteEvent {
         vote: vote_id,
-        admin,
-        description,
-        initiator: ctx.sender(),
+        vote_type: add_admin_vote(),
     });
 }
 
@@ -292,9 +254,8 @@ public fun approve_admin(
     registry.last_vote_timestamp = clock.timestamp_ms();
     admin_vote.enforced = true;
 
-    event::emit(AdminAddedEvent { 
-        admin: admin_vote.admin, 
-        vote: option::some(object::id(admin_vote)),
+    event::emit(AdminVoteFinalizedEvent { 
+        vote: object::id(admin_vote),
     });
 }
 
@@ -325,11 +286,9 @@ public fun suggest_admin_blacklist(
 
     transfer::share_object(vote);
 
-    event::emit(BlacklistVoteEvent {
+    event::emit(AdminVoteEvent {
         vote: vote_id,
-        admin,
-        description,
-        initiator: ctx.sender(),
+        vote_type: blacklist_admin_vote(),
     });
 }
 
@@ -377,8 +336,7 @@ public fun approve_blacklisting(
     registry.last_vote_timestamp = clock.timestamp_ms();
     admin_blacklist_vote.enforced = true;
 
-    event::emit(AdminBlacklistedEvent { 
-        admin: admin_blacklist_vote.admin, 
+    event::emit(AdminVoteFinalizedEvent { 
         vote: object::id(admin_blacklist_vote),
     });
 }
@@ -409,11 +367,9 @@ public fun suggest_treasury_update(
 
     transfer::share_object(vote);
 
-    event::emit(TreasuryVoteEvent {
+    event::emit(AdminVoteEvent {
         vote: vote_id,
-        treasury: treasury_address,
-        description,
-        initiator: ctx.sender(),
+        vote_type: change_treasury_vote(),
     });
 }
 
@@ -456,6 +412,10 @@ public fun approve_treasury_update(
     registry.treasury_address = treasury_update_vote.treasury;
     registry.last_vote_timestamp = clock.timestamp_ms();
     treasury_update_vote.enforced = true;
+
+    event::emit(AdminVoteFinalizedEvent { 
+        vote: object::id(treasury_update_vote),
+    });
 }
 
 public fun suggest_threshold_update(
@@ -485,11 +445,9 @@ public fun suggest_threshold_update(
 
     transfer::share_object(vote);
 
-    event::emit(ThresholdVoteEvent {
+    event::emit(AdminVoteEvent {
         vote: vote_id,
-        threshold,
-        description,
-        initiator: ctx.sender(),
+        vote_type: change_threshold_vote(),
     });
 }
 
@@ -536,6 +494,10 @@ public fun approve_theshold_update(
     registry.vote_threshold = threshold_update_vote.threshold;
     registry.last_vote_timestamp = clock.timestamp_ms();
     threshold_update_vote.enforced = true;
+
+    event::emit(AdminVoteFinalizedEvent { 
+        vote: object::id(threshold_update_vote),
+    })
 }
 
 public fun reset_min_threshold(
@@ -604,10 +566,6 @@ public(package) fun unregister_court(
     assert!(registry.courts.contains(&court_id), ECourtDoesNotExist);
 
     registry.courts.remove(&court_id);
-
-    sui::event::emit(CourtUnregisteredEvent { 
-        court: court_id,
-    });
 }
 
 public(package) fun register_case_lost(
