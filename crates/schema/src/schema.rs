@@ -16,6 +16,26 @@ diesel::table! {
 }
 
 diesel::table! {
+    balance_event (id) {
+        id -> Int8,
+        nivster -> Nullable<Text>,
+        court -> Nullable<Text>,
+        event_type -> Int2,
+        amount_nvr -> Nullable<Int8>,
+        amount_sui -> Nullable<Int8>,
+        lock_nvr -> Nullable<Int8>,
+        dispute_id -> Nullable<Text>,
+        sender -> Text,
+        checkpoint -> Int8,
+        timestamp -> Timestamp,
+        checkpoint_timestamp_ms -> Int8,
+        package -> Text,
+        digest -> Text,
+        event_digest -> Text,
+    }
+}
+
+diesel::table! {
     court (court_id) {
         court_id -> Text,
         name -> Text,
@@ -134,23 +154,61 @@ diesel::table! {
 }
 
 diesel::table! {
+    evidence (evidence_id) {
+        evidence_id -> Text,
+        dispute_id -> Text,
+        owner -> Text,
+        description -> Text,
+        src -> Nullable<Text>,
+        file_name -> Nullable<Text>,
+        file_type -> Nullable<Text>,
+        file_subtype -> Nullable<Text>,
+        encrypted -> Bool,
+        modified -> Nullable<Timestamp>,
+        sender -> Text,
+        checkpoint -> Int8,
+        timestamp -> Timestamp,
+        checkpoint_timestamp_ms -> Int8,
+        package -> Text,
+        digest -> Text,
+        event_digest -> Text,
+    }
+}
+
+diesel::table! {
     nivster (address) {
         address -> Text,
     }
 }
 
+diesel::table! {
+    worker_pool (court, nivster) {
+        court -> Text,
+        nivster -> Text,
+    }
+}
+
+diesel::joinable!(balance_event -> court (court));
+diesel::joinable!(balance_event -> dispute (dispute_id));
+diesel::joinable!(balance_event -> nivster (nivster));
 diesel::joinable!(dispute -> court (court_id));
 diesel::joinable!(dispute_event -> dispute (dispute_id));
 diesel::joinable!(dispute_nivster -> dispute (dispute_id));
 diesel::joinable!(dispute_nivster -> nivster (nivster));
 diesel::joinable!(dispute_payment -> dispute (dispute_id));
+diesel::joinable!(evidence -> dispute (dispute_id));
+diesel::joinable!(worker_pool -> court (court));
+diesel::joinable!(worker_pool -> nivster (nivster));
 
 diesel::allow_tables_to_appear_in_same_query!(
     admin_vote,
+    balance_event,
     court,
     dispute,
     dispute_event,
     dispute_nivster,
     dispute_payment,
+    evidence,
     nivster,
+    worker_pool,
 );

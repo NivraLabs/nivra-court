@@ -1,0 +1,32 @@
+-- Your SQL goes here
+
+CREATE TABLE IF NOT EXISTS balance_event
+(
+    id                          BIGSERIAL    PRIMARY KEY,
+    nivster                     TEXT         REFERENCES nivster(address),
+    court                       TEXT         REFERENCES court(court_id),
+    event_type                  SMALLINT     NOT NULL,
+    amount_nvr                  BIGINT,
+    amount_sui                  BIGINT,
+    lock_nvr                    BIGINT,
+    dispute_id                  TEXT         REFERENCES dispute(dispute_id),
+    sender                      TEXT         NOT NULL,
+    checkpoint                  BIGINT       NOT NULL,
+    timestamp                   TIMESTAMP    DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    checkpoint_timestamp_ms     BIGINT       NOT NULL,
+    package                     TEXT         NOT NULL,
+    digest                      TEXT         NOT NULL,
+    event_digest                TEXT         NOT NULL
+);
+
+CREATE INDEX idx_balance_court ON balance_event
+(court, nivster, checkpoint_timestamp_ms);
+
+CREATE TABLE IF NOT EXISTS worker_pool
+(
+    court                       TEXT         REFERENCES court(court_id),
+    nivster                     TEXT         REFERENCES nivster(address),
+    PRIMARY KEY (court, nivster)
+);
+
+CREATE INDEX idx_worker_pool_court ON worker_pool(court);

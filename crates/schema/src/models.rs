@@ -1,6 +1,7 @@
+use chrono::NaiveDateTime;
 use diesel::{Identifiable, Insertable, Queryable, Selectable, deserialize::FromSqlRow, expression::AsExpression, sql_types::SmallInt};
 
-use crate::schema::{admin_vote, court, dispute, dispute_event, dispute_nivster, dispute_payment, nivster};
+use crate::schema::{admin_vote, balance_event, court, dispute, dispute_event, dispute_nivster, dispute_payment, evidence, nivster, worker_pool};
 
 #[derive(Queryable, Selectable, Insertable, Identifiable, Debug)]
 #[diesel(table_name = admin_vote, primary_key(vote_id))]
@@ -197,4 +198,64 @@ pub enum DisputePaymentType {
     OpeningFee = 1,
     AppealFee = 2,
     Refund = 3,
+}
+
+#[derive(Queryable, Selectable, Insertable, Identifiable, Debug)]
+#[diesel(table_name = balance_event, primary_key(id))]
+pub struct BalanceEvent {
+    pub id: i64,
+    pub nivster: Option<String>,
+    pub court: Option<String>,
+    pub event_type: BalanceEventType,
+    pub amount_nvr: Option<i64>,
+    pub amount_sui: Option<i64>,
+    pub lock_nvr: Option<i64>,
+    pub dispute_id: Option<String>,
+    pub sender: String,
+    pub checkpoint: i64,
+    pub checkpoint_timestamp_ms: i64,
+    pub package: String,
+    pub digest: String,
+    pub event_digest: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, AsExpression, FromSqlRow)]
+#[diesel(sql_type = SmallInt)]
+#[repr(i16)]
+pub enum BalanceEventType {
+    Deposit = 1,
+    Withdrawal = 2,
+    Locked = 3,
+    Unlocked = 4,
+    UnlockedWithPenalty = 5,
+    UnlockedWithReward = 6,
+}
+
+#[derive(Queryable, Selectable, Insertable, Identifiable, Debug)]
+#[diesel(table_name = worker_pool)]
+#[diesel(primary_key(court, nivster))]
+pub struct WorkerPool {
+    pub court: String,
+    pub nivster: String,
+}
+
+#[derive(Queryable, Selectable, Insertable, Identifiable, Debug)]
+#[diesel(table_name = evidence, primary_key(evidence_id))]
+pub struct Evidence {
+    pub evidence_id: String,
+    pub dispute_id: String,
+    pub owner: String,
+    pub description: String,
+    pub src: Option<String>,
+    pub file_name: Option<String>,
+    pub file_type: Option<String>,
+    pub file_subtype: Option<String>,
+    pub encrypted: bool,
+    pub modified: Option<NaiveDateTime>,
+    pub sender: String,
+    pub checkpoint: i64,
+    pub checkpoint_timestamp_ms: i64,
+    pub package: String,
+    pub digest: String,
+    pub event_digest: String,
 }

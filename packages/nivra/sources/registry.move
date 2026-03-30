@@ -25,7 +25,7 @@ use nivra::constants::change_threshold_vote;
 const NIVRA_PROTOCOL: address = 
     @0x78b21978658505237a465ef20a4cf3ce2d418fda9cfb3ce4a0e4be7f9a16187d;
 const RASMUS: address = 
-    @0x1;
+    @0x21def5136df72162c3bf33b4038d397926c777baa1c31515cff8f4527eabbf30;
 const ELMERI: address = 
     @0x0eb4bdaf7b57fc5a7cdaf88c3187c4289ed5f2794e8ba87de82a05c859cebbc9;
 const PATRIK: address = 

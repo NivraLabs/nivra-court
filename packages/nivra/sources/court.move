@@ -280,7 +280,7 @@ public fun stake(
             *stake.worker_pool_pos.borrow(), 
             deposit_amount
         );
-    } else {
+    } else if (!court.worker_pool.is_full()) {
         let pos = court.worker_pool.push_back(ctx.sender(), stake.amount);
         stake.worker_pool_pos = option::some(pos);
     };
