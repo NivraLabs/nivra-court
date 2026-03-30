@@ -51,4 +51,106 @@ diesel::table! {
     }
 }
 
-diesel::allow_tables_to_appear_in_same_query!(admin_vote, court,);
+diesel::table! {
+    dispute (dispute_id) {
+        dispute_id -> Text,
+        contract_id -> Text,
+        court_id -> Text,
+        status -> Int2,
+        round -> Int2,
+        appeals_used -> Int2,
+        result -> Nullable<Array<Nullable<Int4>>>,
+        winner_option -> Nullable<Text>,
+        cancellation_reason -> Nullable<Int2>,
+        max_appeals -> Int2,
+        initiator -> Text,
+        options -> Array<Nullable<Text>>,
+        options_party_mapping -> Array<Nullable<Text>>,
+        round_init_ms -> Int8,
+        response_period_ms -> Int8,
+        draw_period_ms -> Int8,
+        evidence_period_ms -> Int8,
+        voting_period_ms -> Int8,
+        appeal_period_ms -> Int8,
+        init_nivster_count -> Int2,
+        sanction_model -> Int2,
+        coefficient -> Int2,
+        dispute_fee -> Int8,
+        treasury_share -> Int2,
+        treasury_share_nvr -> Int2,
+        empty_vote_penalty -> Int2,
+        key_servers -> Array<Nullable<Text>>,
+        public_keys -> Array<Nullable<Text>>,
+        threshold -> Int2,
+        sender -> Text,
+        checkpoint -> Int8,
+        timestamp -> Timestamp,
+        checkpoint_timestamp_ms -> Int8,
+        package -> Text,
+        digest -> Text,
+        event_digest -> Text,
+    }
+}
+
+diesel::table! {
+    dispute_event (id) {
+        id -> Int8,
+        dispute_id -> Text,
+        event_type -> Int2,
+        sender -> Text,
+        checkpoint -> Int8,
+        timestamp -> Timestamp,
+        checkpoint_timestamp_ms -> Int8,
+        package -> Text,
+        digest -> Text,
+        event_digest -> Text,
+    }
+}
+
+diesel::table! {
+    dispute_nivster (dispute_id, nivster) {
+        dispute_id -> Text,
+        nivster -> Text,
+        votes -> Int2,
+        stake -> Int8,
+    }
+}
+
+diesel::table! {
+    dispute_payment (id) {
+        id -> Int8,
+        dispute_id -> Text,
+        party -> Text,
+        amount -> Int8,
+        payment_type -> Int2,
+        sender -> Text,
+        checkpoint -> Int8,
+        timestamp -> Timestamp,
+        checkpoint_timestamp_ms -> Int8,
+        package -> Text,
+        digest -> Text,
+        event_digest -> Text,
+    }
+}
+
+diesel::table! {
+    nivster (address) {
+        address -> Text,
+    }
+}
+
+diesel::joinable!(dispute -> court (court_id));
+diesel::joinable!(dispute_event -> dispute (dispute_id));
+diesel::joinable!(dispute_nivster -> dispute (dispute_id));
+diesel::joinable!(dispute_nivster -> nivster (nivster));
+diesel::joinable!(dispute_payment -> dispute (dispute_id));
+
+diesel::allow_tables_to_appear_in_same_query!(
+    admin_vote,
+    court,
+    dispute,
+    dispute_event,
+    dispute_nivster,
+    dispute_payment,
+    nivster,
+);

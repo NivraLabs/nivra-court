@@ -4,6 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-diesel = { workspace = true, features = ["postgres"] }
+diesel = { workspace = true, features = ["postgres", "64-column-tables"] }
 diesel_migrations.workspace = true
 serde = { workspace = true }

@@ -148,26 +148,20 @@ public struct NivsterSelectionEvent has copy, drop {
 
 public struct ResponsePeriodEvent has copy, drop {
     dispute: ID,
-    round: u64,
-    timestamp: u64,
 }
 
 public struct DrawPeriodEvent has copy, drop {
     dispute: ID,
-    round: u64,
-    timestamp: u64,
 }
 
 public struct NewRoundEvent has copy, drop {
     dispute: ID,
-    round: u64,
     timestamp: u64,
     tie_round: bool,
 }
 
 public struct VoteFinalizedEvent has copy, drop {
     dispute: ID,
-    round: u64,
     result: Option<String>,
     options: vector<String>,
     votes_per_option: vector<u64>,
@@ -180,13 +174,11 @@ public struct DisputeCancelledEvent has copy, drop {
 
 public struct DisputeResolvedOneSided has copy, drop {
     dispute: ID,
-    winner_party: address,
     winner_option: String,
 }
 
 public struct DisputeCompleted has copy, drop {
     dispute: ID,
-    winner_party: address,
     winner_option: String,
 }
 
@@ -291,7 +283,6 @@ public fun finalize_vote(
 
     event::emit(VoteFinalizedEvent {
         dispute: object::id(dispute),
-        round: dispute.round,
         result: winner_option_idx.map!(|idx| {
             let (k, _) = dispute.options.get_entry_by_idx(idx);
             *k
@@ -802,8 +793,6 @@ public(package) fun start_response_period(
 
     event::emit(ResponsePeriodEvent {
         dispute: object::id(dispute),
-        round: dispute.round,
-        timestamp: dispute.schedule.round_init_ms,
     });
 }
 
@@ -813,8 +802,6 @@ public(package) fun start_draw_period(dispute: &mut Dispute, clock: &Clock) {
 
     event::emit(DrawPeriodEvent { 
         dispute: object::id(dispute),
-        round: dispute.round,
-        timestamp: dispute.schedule.round_init_ms,
     });
 }
 
@@ -872,7 +859,6 @@ public(package) fun start_new_round(
 
     event::emit(NewRoundEvent {
         dispute: object::id(dispute),
-        round: dispute.round,
         timestamp: dispute.schedule.round_init_ms,
         tie_round: false,
     });
@@ -894,7 +880,6 @@ public(package) fun start_new_round_tie(
 
     event::emit(NewRoundEvent {
         dispute: object::id(dispute),
-        round: dispute.round,
         timestamp: dispute.schedule.round_init_ms,
         tie_round: true,
     });
@@ -1009,7 +994,6 @@ public(package) fun resolve_dispute_one_sided(
 
     event::emit(DisputeResolvedOneSided {
         dispute: object::id(dispute),
-        winner_party,
         winner_option: *winner_option,
     });
 }
@@ -1020,7 +1004,6 @@ public(package) fun complete_dispute(
 ) {
     dispute.status = dispute_status_completed();
     let winner_option = dispute.winner_option();
-    let winner_party = dispute.winner_party();
 
     dispute.parties().do!(|party| {
         transfer::public_transfer(
@@ -1039,7 +1022,6 @@ public(package) fun complete_dispute(
 
     event::emit(DisputeCompleted {
         dispute: object::id(dispute),
-        winner_party: *winner_party.borrow(),
         winner_option: *winner_option.borrow(),
     });
 }
