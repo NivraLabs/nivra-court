@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS evidence
     file_type                   TEXT,
     file_subtype                TEXT,
     encrypted                   BOOLEAN      NOT NULL,
+    censored                    BOOLEAN      NOT NULL,
     modified                    TIMESTAMP,
     sender                      TEXT         NOT NULL,
     checkpoint                  BIGINT       NOT NULL,

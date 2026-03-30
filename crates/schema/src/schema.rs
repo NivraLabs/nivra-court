@@ -164,6 +164,7 @@ diesel::table! {
         file_type -> Nullable<Text>,
         file_subtype -> Nullable<Text>,
         encrypted -> Bool,
+        censored -> Bool,
         modified -> Nullable<Timestamp>,
         sender -> Text,
         checkpoint -> Int8,

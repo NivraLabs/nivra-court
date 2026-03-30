@@ -252,6 +252,7 @@ pub struct Evidence {
     pub file_type: Option<String>,
     pub file_subtype: Option<String>,
     pub encrypted: bool,
+    pub censored: bool,
     pub modified: Option<NaiveDateTime>,
     pub sender: String,
     pub checkpoint: i64,
