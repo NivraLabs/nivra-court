@@ -570,12 +570,14 @@ public fun cancel_dispute(
             sum + deposit.amount()
         });
 
-        transfer::public_transfer(
-            court.reward_pool.split(total_deposit_amount).into_coin(ctx),
-            *party
-        );
+        if (total_deposit_amount > 0) {
+            transfer::public_transfer(
+                court.reward_pool.split(total_deposit_amount).into_coin(ctx),
+                *party
+            );
             
-        dispute.register_refund(total_deposit_amount, *party, clock);
+            dispute.register_refund(total_deposit_amount, *party, clock);
+        };
     });
 
     // Refund the nivsters.
