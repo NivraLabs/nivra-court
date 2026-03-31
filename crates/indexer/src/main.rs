@@ -1,9 +1,13 @@
 use std::net::SocketAddr;
 
+use anyhow::Context;
 use clap::Parser;
 use nivra_indexer::NivraEnv;
-use sui_indexer_alt_framework::{IndexerArgs, ingestion::streaming_client::StreamingClientArgs};
-use sui_pg_db::DbArgs;
+use nivra_schema::MIGRATIONS;
+use prometheus::Registry;
+use sui_indexer_alt_framework::{Indexer, IndexerArgs, ingestion::{ClientArgs, IngestionConfig, ingestion_client::IngestionClientArgs, streaming_client::StreamingClientArgs}};
+use sui_indexer_alt_metrics::{MetricsArgs, MetricsService, db::DbConnectionStatsCollector};
+use sui_pg_db::{Db, DbArgs};
 use url::Url;
 
 
@@ -46,6 +50,54 @@ async fn main() -> Result<(), anyhow::Error> {
         env,
         packages,
     } = Args::parse();
-    
+
+    let ingestion_args = IngestionClientArgs {
+        remote_store_url: Some(env.remote_store_url()),
+        ..Default::default()
+    };
+
+    let registry = Registry::new_custom(Some("nivra".into()), None)
+        .context("Failed to create Prometheus registry.")?;
+    let metrics = MetricsService::new(MetricsArgs { metrics_address }, registry.clone());
+
+    let store = Db::for_write(database_url, db_args)
+        .await
+        .context("Failed to connect to database")?;
+
+    store
+        .run_migrations(Some(&MIGRATIONS))
+        .await
+        .context("Failed to run pending migrations")?;
+
+    registry.register(Box::new(DbConnectionStatsCollector::new(
+        Some("nivra_indexer_db"),
+        store.clone(),
+    )))?;
+
+    let mut indexer = Indexer::new(
+        store,
+        indexer_args,
+        ClientArgs {
+            ingestion: ingestion_args,
+            streaming: streaming_args,
+        },
+        IngestionConfig::default(),
+        None,
+        metrics.registry(),
+    )
+    .await?;
+
+    for package in &packages {
+        match package {
+            Package::Nivra => {
+
+            },
+        }
+    }
+
+    let s_indexer = indexer.run().await?;
+    let s_metrics = metrics.run().await?;
+
+    s_indexer.attach(s_metrics).main().await?;
     Ok(())
 }
