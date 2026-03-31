@@ -1,63 +1,54 @@
 use chrono::NaiveDateTime;
 use diesel::{Identifiable, Insertable, Queryable, Selectable, deserialize::FromSqlRow, expression::AsExpression, sql_types::SmallInt};
+use sui_field_count::FieldCount;
 
 use crate::schema::{admin_vote, balance_event, court, dispute, dispute_event, dispute_nivster, dispute_payment, evidence, nivster, worker_pool};
 
-#[derive(Queryable, Selectable, Insertable, Identifiable, Debug)]
+#[derive(Queryable, Selectable, Insertable, Identifiable, FieldCount, Debug)]
 #[diesel(table_name = admin_vote, primary_key(vote_id))]
 pub struct AdminVote {
-    vote_id: String,
-    vote_type: AdminVoteType,
-    vote_enforced: bool,
-    sender: String,
-    checkpoint: i64,
-    checkpoint_timestamp_ms: i64,
-    package: String,
-    digest: String,
-    event_digest: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, AsExpression, FromSqlRow)]
-#[diesel(sql_type = SmallInt)]
-#[repr(i16)]
-pub enum AdminVoteType {
-    AddAdmin = 1,
-    BlacklistAdmin = 2,
-    ChangeTreasury = 3,
-    ChangeTreshold = 4,
+    pub vote_id: String,
+    pub vote_type: i16,
+    pub vote_enforced: bool,
+    pub sender: String,
+    pub checkpoint: i64,
+    pub checkpoint_timestamp_ms: i64,
+    pub package: String,
+    pub digest: String,
+    pub event_digest: String,
 }
 
 #[derive(Queryable, Selectable, Insertable, Identifiable, Debug)]
 #[diesel(table_name = court, primary_key(court_id))]
 pub struct Court {
-    court_id: String,
-    name: String,
-    category: String,
-    description: String,
-    ai_court: bool,
-    response_period_ms: i64,
-    draw_period_ms: i64,
-    voting_period_ms: i64,
-    appeal_period_ms: i64,
-    min_stake: i64,
-    reputation_requirement: i16,
-    init_nivster_count: i16,
-    sanction_model: i16,
-    coefficient: i16,
-    dispute_fee: i64,
-    treasury_share: i16,
-    treasury_share_nvr: i16,
-    empty_vote_penalty: i16,
-    status: CourtStatus,
-    key_servers: Vec<String>,
-    public_keys: Vec<String>,
-    threshold: i16,
-    sender: String,
-    checkpoint: i64,
-    checkpoint_timestamp_ms: i64,
-    package: String,
-    digest: String,
-    event_digest: String,
+    pub court_id: String,
+    pub name: String,
+    pub category: String,
+    pub description: String,
+    pub ai_court: bool,
+    pub response_period_ms: i64,
+    pub draw_period_ms: i64,
+    pub voting_period_ms: i64,
+    pub appeal_period_ms: i64,
+    pub min_stake: i64,
+    pub reputation_requirement: i16,
+    pub init_nivster_count: i16,
+    pub sanction_model: i16,
+    pub coefficient: i16,
+    pub dispute_fee: i64,
+    pub treasury_share: i16,
+    pub treasury_share_nvr: i16,
+    pub empty_vote_penalty: i16,
+    pub status: CourtStatus,
+    pub key_servers: Vec<String>,
+    pub public_keys: Vec<String>,
+    pub threshold: i16,
+    pub sender: String,
+    pub checkpoint: i64,
+    pub checkpoint_timestamp_ms: i64,
+    pub package: String,
+    pub digest: String,
+    pub event_digest: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, AsExpression, FromSqlRow)]

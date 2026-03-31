@@ -55,7 +55,7 @@ pub trait MoveStruct: Serialize {
 
 pub fn get_package_addresses_for_module(
     module: &str,
-    env: crate::NivraEnv,
+    env: NivraEnv,
 ) -> Result<Vec<Address>, String> {
     match get_module_type(module) {
         ModuleType::Nivra => {

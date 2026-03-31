@@ -29,9 +29,9 @@ const RASMUS: address =
 const ELMERI: address = 
     @0x0eb4bdaf7b57fc5a7cdaf88c3187c4289ed5f2794e8ba87de82a05c859cebbc9;
 const PATRIK: address = 
-    @0x3;
+    @0xba8089644adbfa2421f6432c674df9f809cc253e8b20cd892800e81fe974bb95;
 const LUKA: address = 
-    @0x4;
+    @0xd852f054563382af4bd6196c6b76ee662312f0e312ef9165bf73cce75228bfac;
 
 // === Errors ===
 const EWrongVersion: u64 = 1;

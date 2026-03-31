@@ -1,6 +1,11 @@
+use std::str::FromStr;
+
+use move_core_types::account_address::AccountAddress;
 use url::Url;
 
+pub(crate) mod models;
 pub mod traits;
+pub mod handlers;
 
 pub const MAINNET_REMOTE_STORE_URL: &str = "https://checkpoints.mainnet.sui.io";
 pub const TESTNET_REMOTE_STORE_URL: &str = "https://checkpoints.testnet.sui.io";
@@ -58,5 +63,12 @@ impl NivraEnv {
             NivraEnv::Mainnet => MAINNET_PACKAGES,
             NivraEnv::Testnet => TESTNET_PACKAGES,
         }
+    }
+
+    pub fn package_addresses(&self) -> Vec<AccountAddress> {
+        self.get_nivra_package_addresses()
+            .iter()
+            .map(|pkg| AccountAddress::from_str(pkg).unwrap())
+            .collect()
     }
 }

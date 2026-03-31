@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+sui-field-count = { git = "https://github.com/MystenLabs/sui.git", branch = "testnet" }
 diesel = { workspace = true, features = ["postgres", "64-column-tables", "chrono"] }
 diesel_migrations.workspace = true
 serde = { workspace = true }

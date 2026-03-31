@@ -4940,11 +4940,12 @@ name = "nivra-indexer"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
+ "bcs",
  "chrono",
  "clap",
  "diesel",
  "diesel-async",
- "hex",
  "move-core-types",
  "nivra-schema",
  "prometheus",
@@ -4953,6 +4954,7 @@ dependencies = [
  "sui-indexer-alt-metrics",
  "sui-pg-db",
  "sui-sdk-types 0.3.0",
+ "sui-types",
  "tokio",
  "url",
 ]
@@ -4965,6 +4967,7 @@ dependencies = [
  "diesel",
  "diesel_migrations",
  "serde",
+ "sui-field-count",
 ]
 
 [[package]]

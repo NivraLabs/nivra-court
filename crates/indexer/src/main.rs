@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 
 use anyhow::Context;
 use clap::Parser;
-use nivra_indexer::NivraEnv;
+use nivra_indexer::{NivraEnv, handlers::{admin_vote_finalized_handler::AdminVoteFinalizedHandler, admin_vote_handler::AdminVoteHandler}};
 use nivra_schema::MIGRATIONS;
 use prometheus::Registry;
 use sui_indexer_alt_framework::{Indexer, IndexerArgs, ingestion::{ClientArgs, IngestionConfig, ingestion_client::IngestionClientArgs, streaming_client::StreamingClientArgs}};
@@ -90,7 +90,12 @@ async fn main() -> Result<(), anyhow::Error> {
     for package in &packages {
         match package {
             Package::Nivra => {
-
+                indexer
+                    .sequential_pipeline(AdminVoteHandler::new(env), Default::default())
+                    .await?;
+                indexer
+                    .sequential_pipeline(AdminVoteFinalizedHandler::new(env), Default::default())
+                    .await?;
             },
         }
     }
