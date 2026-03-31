@@ -11,13 +11,17 @@ diesel-async = { workspace = true, features = ["bb8", "postgres"] }
 chrono.workspace = true
 anyhow.workspace = true
 prometheus.workspace = true
+serde.workspace = true
 
 nivra-schema = { path = "../schema" }
 
+sui-sdk-types = {version = "0.3.0", features = ["serde"] }
+move-core-types = { git = "https://github.com/MystenLabs/sui.git", branch = "testnet" }
 sui-indexer-alt-framework = { git = "https://github.com/MystenLabs/sui.git", branch = "testnet" }
 sui-pg-db = { git = "https://github.com/MystenLabs/sui.git", branch = "testnet" }
 sui-indexer-alt-metrics = { git = "https://github.com/MystenLabs/sui.git", branch = "testnet" }
 url = "2.5.4"
+hex = "0.4.3"
 
 [[bin]]
 name = "nivra-indexer"

@@ -4944,11 +4944,15 @@ dependencies = [
  "clap",
  "diesel",
  "diesel-async",
+ "hex",
+ "move-core-types",
  "nivra-schema",
  "prometheus",
+ "serde",
  "sui-indexer-alt-framework",
  "sui-indexer-alt-metrics",
  "sui-pg-db",
+ "sui-sdk-types 0.3.0",
  "tokio",
  "url",
 ]
@@ -7688,7 +7692,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "signature 2.2.0",
- "sui-sdk-types",
+ "sui-sdk-types 0.2.2",
 ]
 
 [[package]]
@@ -7805,7 +7809,7 @@ dependencies = [
  "sui-pg-db",
  "sui-rpc",
  "sui-rpc-api",
- "sui-sdk-types",
+ "sui-sdk-types 0.2.2",
  "sui-storage",
  "sui-types",
  "tempfile",
@@ -8049,7 +8053,7 @@ dependencies = [
  "prost-types 0.14.3",
  "serde",
  "serde_json",
- "sui-sdk-types",
+ "sui-sdk-types 0.2.2",
  "tap",
  "tokio",
  "tonic 0.14.5",
@@ -8093,7 +8097,7 @@ dependencies = [
  "sui-package-resolver",
  "sui-protocol-config",
  "sui-rpc",
- "sui-sdk-types",
+ "sui-sdk-types 0.2.2",
  "sui-transaction-builder",
  "sui-types",
  "tap",
@@ -8120,6 +8124,27 @@ dependencies = [
  "base64ct",
  "bcs",
  "blake2",
+ "bnum",
+ "bs58 0.5.1",
+ "bytes",
+ "bytestring",
+ "itertools 0.14.0",
+ "roaring 0.11.3",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "serde_with",
+ "winnow 0.7.15",
+]
+
+[[package]]
+name = "sui-sdk-types"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fff64505eccf5b20b3f7f25b609ee176aeac93705187c31a9b8ba08ec93ada76"
+dependencies = [
+ "base64ct",
+ "bcs",
  "bnum",
  "bs58 0.5.1",
  "bytes",
@@ -8276,7 +8301,7 @@ dependencies = [
  "sui-macros",
  "sui-protocol-config",
  "sui-rpc",
- "sui-sdk-types",
+ "sui-sdk-types 0.2.2",
  "tap",
  "thiserror 1.0.69",
  "tonic 0.14.5",

@@ -30,7 +30,6 @@ use nivra::constants::dispute_status_completed_one_sided;
 use nivra::constants::dispute_status_completed;
 use nivra::constants::dispute_status_censored;
 use nivra::registry::Registry;
-use std::unit_test::assert_eq;
 
 // === Constants ===
 // Dispute cancellation reasons.
@@ -167,7 +166,6 @@ public struct NewRoundEvent has copy, drop {
 public struct VoteFinalizedEvent has copy, drop {
     dispute: ID,
     result: Option<String>,
-    options: vector<String>,
     votes_per_option: vector<u64>,
 }
 
@@ -295,7 +293,6 @@ public fun finalize_vote(
             let (k, _) = dispute.options.get_entry_by_idx(idx);
             *k
         }),
-        options: dispute.options.keys(),
         votes_per_option: dispute.result,
     });
 }

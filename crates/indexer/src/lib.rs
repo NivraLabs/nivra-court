@@ -1,8 +1,42 @@
 use url::Url;
 
+pub mod traits;
 
 pub const MAINNET_REMOTE_STORE_URL: &str = "https://checkpoints.mainnet.sui.io";
 pub const TESTNET_REMOTE_STORE_URL: &str = "https://checkpoints.testnet.sui.io";
+
+const MAINNET_PACKAGES: &[&str] = &[
+
+];
+
+const TESTNET_PACKAGES: &[&str] = &[
+
+];
+
+pub const NIVRA_MODULES: &[&str] = &[
+    "registry",
+    "court",
+    "dispute",
+    "evidence",
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModuleType {
+    Nivra,
+    Unknown,
+}
+
+pub fn is_nivra_module(module: &str) -> bool {
+    NIVRA_MODULES.contains(&module)
+}
+
+pub fn get_module_type(module: &str) -> ModuleType {
+    if is_nivra_module(module) {
+        ModuleType::Nivra
+    } else {
+        ModuleType::Unknown
+    }
+}
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum NivraEnv {
@@ -17,5 +51,12 @@ impl NivraEnv {
             NivraEnv::Testnet => TESTNET_REMOTE_STORE_URL,
         };
         Url::parse(url).unwrap()
+    }
+
+    pub fn get_nivra_package_addresses(&self) -> &'static [&'static str] {
+        match self {
+            NivraEnv::Mainnet => MAINNET_PACKAGES,
+            NivraEnv::Testnet => TESTNET_PACKAGES,
+        }
     }
 }
