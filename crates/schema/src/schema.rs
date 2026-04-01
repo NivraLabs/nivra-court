@@ -18,12 +18,12 @@ diesel::table! {
 diesel::table! {
     balance_event (id) {
         id -> Int8,
-        nivster -> Nullable<Text>,
-        court -> Nullable<Text>,
+        nivster -> Text,
+        court -> Text,
         event_type -> Int2,
-        amount_nvr -> Nullable<Int8>,
-        amount_sui -> Nullable<Int8>,
-        lock_nvr -> Nullable<Int8>,
+        amount_nvr -> Int8,
+        amount_sui -> Int8,
+        lock_nvr -> Int8,
         dispute_id -> Nullable<Text>,
         sender -> Text,
         checkpoint -> Int8,
@@ -171,12 +171,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    nivster (address) {
-        address -> Text,
-    }
-}
-
-diesel::table! {
     watermarks (pipeline) {
         pipeline -> Text,
         epoch_hi_inclusive -> Int8,
@@ -199,15 +193,12 @@ diesel::table! {
 
 diesel::joinable!(balance_event -> court (court));
 diesel::joinable!(balance_event -> dispute (dispute_id));
-diesel::joinable!(balance_event -> nivster (nivster));
 diesel::joinable!(dispute -> court (court_id));
 diesel::joinable!(dispute_event -> dispute (dispute_id));
 diesel::joinable!(dispute_nivster -> dispute (dispute_id));
-diesel::joinable!(dispute_nivster -> nivster (nivster));
 diesel::joinable!(dispute_payment -> dispute (dispute_id));
 diesel::joinable!(evidence -> dispute (dispute_id));
 diesel::joinable!(worker_pool -> court (court));
-diesel::joinable!(worker_pool -> nivster (nivster));
 
 diesel::allow_tables_to_appear_in_same_query!(
     admin_vote,
@@ -218,7 +209,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     dispute_nivster,
     dispute_payment,
     evidence,
-    nivster,
     watermarks,
     worker_pool,
 );

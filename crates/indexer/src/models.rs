@@ -121,5 +121,33 @@ pub mod nivra {
             const MODULE: &'static str = "court";
             const NAME: &'static str = "CourtOperationChanged";
         }
+
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        pub struct BalanceEvent {
+            pub nivster: Address,
+            pub court: ObjectID,
+            pub event_type: u8,
+            pub amount_nvr: u64,
+            pub amount_sui: u64,
+            pub lock_nvr: u64,
+            pub dispute_id: Option<ObjectID>,              
+        }
+
+        impl MoveStruct for BalanceEvent {
+            const MODULE: &'static str = "court";
+            const NAME: &'static str = "BalanceEvent";
+        }
+
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        pub struct WorkerPoolEvent {
+            pub court: ObjectID,
+            pub nivster: Address,
+            pub entry: bool,
+        }
+
+        impl MoveStruct for WorkerPoolEvent {
+            const MODULE: &'static str = "court";
+            const NAME: &'static str = "WorkerPoolEvent";
+        }
     }
 }

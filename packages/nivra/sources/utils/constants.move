@@ -56,6 +56,14 @@ const STATUS_ACTIVE: u8 = 0;
 const STATUS_HALTED: u8 = 1;
 const MAX_INIT_NIVSTER_COUNT: u64 = 11;
 
+// Court balance event types.
+const BALANCE_DEPOSIT: u8 = 1;
+const BALANCE_WITHDRAWAL: u8 = 2;
+const BALANCE_LOCKED: u8 = 3;
+const BALANCE_UNLOCKED: u8 = 4;
+const BALANCE_UNLOCKED_WITH_PENALTY: u8 = 5;
+const BALANCE_UNLOCKED_WITH_REWARD: u8 = 6;
+
 // Evidence rules.
 const MAX_EVIDENCE_DESCRIPTION_LENGTH: u64 = 2000;
 const MAX_SRC: u64 = 255;
@@ -248,4 +256,28 @@ public fun change_threshold_vote(): u8 {
 
 public fun dispute_status_censored(): u64 {
     DISPUTE_STATUS_CENSORED
+}
+
+public fun balance_deposit(): u8 {
+    BALANCE_DEPOSIT
+}
+
+public fun balance_withdrawal(): u8 {
+    BALANCE_WITHDRAWAL
+}
+
+public fun balance_locked(): u8 {
+    BALANCE_LOCKED
+}
+
+public fun balance_unlocked(): u8 {
+    BALANCE_UNLOCKED
+}
+
+public fun balance_unlocked_with_penalty(): u8 {
+    BALANCE_UNLOCKED_WITH_PENALTY
+}
+
+public fun balance_unlocked_with_reward(): u8 {
+    BALANCE_UNLOCKED_WITH_REWARD
 }

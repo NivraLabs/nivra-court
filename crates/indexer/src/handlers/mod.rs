@@ -6,11 +6,13 @@ use crate::NivraEnv;
 
 pub mod admin_vote_handler;
 pub mod admin_vote_finalized_handler;
+pub mod balance_event_handler;
 pub mod court_created_handler;
 pub mod court_metadata_changed_handler;
 pub mod court_timetable_changed_handler;
 pub mod court_economics_changed_handler;
 pub mod court_operation_changed_handler;
+pub mod worker_pool_event_handler;
 
 pub(crate) fn has_nivra_events(
     tx: &ExecutedTransaction,

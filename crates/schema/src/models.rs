@@ -1,8 +1,9 @@
 use chrono::NaiveDateTime;
 use diesel::{AsChangeset, Identifiable, Insertable, Queryable, Selectable, deserialize::FromSqlRow, expression::AsExpression, sql_types::SmallInt};
+use serde::Deserialize;
 use sui_field_count::FieldCount;
 
-use crate::schema::{admin_vote, balance_event, court, dispute, dispute_event, dispute_nivster, dispute_payment, evidence, nivster, worker_pool};
+use crate::schema::{admin_vote, balance_event, court, dispute, dispute_event, dispute_nivster, dispute_payment, evidence, worker_pool};
 
 #[derive(Queryable, Selectable, Insertable, Identifiable, FieldCount, Debug)]
 #[diesel(table_name = admin_vote, primary_key(vote_id))]
@@ -18,7 +19,7 @@ pub struct AdminVote {
     pub event_digest: String,
 }
 
-#[derive(Queryable, Selectable, Insertable, Identifiable, Debug)]
+#[derive(Queryable, Selectable, Insertable, Identifiable, FieldCount, Debug)]
 #[diesel(table_name = court, primary_key(court_id))]
 pub struct Court {
     pub court_id: String,
@@ -93,12 +94,6 @@ pub struct CourtOperationChangeset {
 }
 
 #[derive(Queryable, Selectable, Insertable, Identifiable, Debug)]
-#[diesel(table_name = nivster, primary_key(address))]
-pub struct Nivster {
-    address: String,
-}
-
-#[derive(Queryable, Selectable, Insertable, Identifiable, Debug)]
 #[diesel(table_name = dispute, primary_key(dispute_id))]
 pub struct Dispute {
     pub dispute_id: String,
@@ -164,27 +159,13 @@ pub enum DisputeCancellationReason {
 pub struct DisputeEvent {
     pub id: i64,
     pub dispute_id: String,
-    pub event_type: DisputeEventType,
+    pub event_type: i16,
     pub sender: String,
     pub checkpoint: i64,
     pub checkpoint_timestamp_ms: i64,
     pub package: String,
     pub digest: String,
     pub event_digest: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, AsExpression, FromSqlRow)]
-#[diesel(sql_type = SmallInt)]
-#[repr(i16)]
-pub enum DisputeEventType {
-    ResponsePeriodStarted = 1,
-    DrawPeriodStarted = 2,
-    NewRoundStarted = 3,
-    TieRoundStarted = 4,
-    VoteFinalized = 5,
-    DisputeCancelled = 6,
-    DisputeResolvedOnesided = 7,
-    DisputeCompleted = 8,
 }
 
 #[derive(Queryable, Selectable, Insertable, Identifiable, Debug)]
@@ -204,7 +185,7 @@ pub struct DisputePayment {
     pub dispute_id: String,
     pub party: String,
     pub amount: i64,
-    pub payment_type: DisputePaymentType,
+    pub payment_type: i16,
     pub sender: String,
     pub checkpoint: i64,
     pub checkpoint_timestamp_ms: i64,
@@ -213,25 +194,16 @@ pub struct DisputePayment {
     pub event_digest: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, AsExpression, FromSqlRow)]
-#[diesel(sql_type = SmallInt)]
-#[repr(i16)]
-pub enum DisputePaymentType {
-    OpeningFee = 1,
-    AppealFee = 2,
-    Refund = 3,
-}
-
-#[derive(Queryable, Selectable, Insertable, Identifiable, Debug)]
+#[derive(Queryable, Selectable, Identifiable, Debug)]
 #[diesel(table_name = balance_event, primary_key(id))]
 pub struct BalanceEvent {
     pub id: i64,
-    pub nivster: Option<String>,
-    pub court: Option<String>,
-    pub event_type: BalanceEventType,
-    pub amount_nvr: Option<i64>,
-    pub amount_sui: Option<i64>,
-    pub lock_nvr: Option<i64>,
+    pub nivster: String,
+    pub court: String,
+    pub event_type: i16,
+    pub amount_nvr: i64,
+    pub amount_sui: i64,
+    pub lock_nvr: i64,
     pub dispute_id: Option<String>,
     pub sender: String,
     pub checkpoint: i64,
@@ -241,16 +213,22 @@ pub struct BalanceEvent {
     pub event_digest: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, AsExpression, FromSqlRow)]
-#[diesel(sql_type = SmallInt)]
-#[repr(i16)]
-pub enum BalanceEventType {
-    Deposit = 1,
-    Withdrawal = 2,
-    Locked = 3,
-    Unlocked = 4,
-    UnlockedWithPenalty = 5,
-    UnlockedWithReward = 6,
+#[derive(Deserialize, Insertable)]
+#[diesel(table_name = balance_event)]
+pub struct NewBalanceEvent {
+    pub nivster: String,
+    pub court: String,
+    pub event_type: i16,
+    pub amount_nvr: i64,
+    pub amount_sui: i64,
+    pub lock_nvr: i64,
+    pub dispute_id: Option<String>,
+    pub sender: String,
+    pub checkpoint: i64,
+    pub checkpoint_timestamp_ms: i64,
+    pub package: String,
+    pub digest: String,
+    pub event_digest: String,
 }
 
 #[derive(Queryable, Selectable, Insertable, Identifiable, Debug)]

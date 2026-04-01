@@ -63,7 +63,7 @@ CREATE INDEX idx_dispute_payment_party ON dispute_payment(party);
 CREATE TABLE IF NOT EXISTS dispute_nivster
 (
     dispute_id                  TEXT         NOT NULL REFERENCES dispute(dispute_id),
-    nivster                     TEXT         NOT NULL REFERENCES nivster(address),
+    nivster                     TEXT         NOT NULL,
     votes                       SMALLINT     NOT NULL,
     stake                       BIGINT       NOT NULL,
     PRIMARY KEY (dispute_id, nivster)

@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 
 use anyhow::Context;
 use clap::Parser;
-use nivra_indexer::{NivraEnv, handlers::{admin_vote_finalized_handler::AdminVoteFinalizedHandler, admin_vote_handler::AdminVoteHandler, court_created_handler::CourtCreatedHandler, court_metadata_changed_handler::CourtMetadataChangedHandler, court_operation_changed_handler::CourtOperationChangedHandler, court_timetable_changed_handler::CourtTimetableChangedHandler}};
+use nivra_indexer::{NivraEnv, handlers::{admin_vote_finalized_handler::AdminVoteFinalizedHandler, admin_vote_handler::AdminVoteHandler, balance_event_handler::BalanceEventHandler, court_created_handler::CourtCreatedHandler, court_metadata_changed_handler::CourtMetadataChangedHandler, court_operation_changed_handler::CourtOperationChangedHandler, court_timetable_changed_handler::CourtTimetableChangedHandler, worker_pool_event_handler::WorkerPoolEventHandler}};
 use nivra_schema::MIGRATIONS;
 use prometheus::Registry;
 use sui_indexer_alt_framework::{Indexer, IndexerArgs, ingestion::{ClientArgs, IngestionConfig, ingestion_client::IngestionClientArgs, streaming_client::StreamingClientArgs}};
@@ -110,6 +110,12 @@ async fn main() -> Result<(), anyhow::Error> {
                     .await?;
                 indexer
                     .sequential_pipeline(CourtOperationChangedHandler::new(env), Default::default())
+                    .await?;
+                indexer
+                    .sequential_pipeline(BalanceEventHandler::new(env), Default::default())
+                    .await?;
+                indexer
+                    .sequential_pipeline(WorkerPoolEventHandler::new(env), Default::default())
                     .await?;
             },
         }
