@@ -12,6 +12,9 @@ pub mod court_metadata_changed_handler;
 pub mod court_timetable_changed_handler;
 pub mod court_economics_changed_handler;
 pub mod court_operation_changed_handler;
+pub mod dispute_created_handler;
+pub mod dispute_payment_handler;
+pub mod nivster_selection_handler;
 pub mod worker_pool_event_handler;
 
 pub(crate) fn has_nivra_events(

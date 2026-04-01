@@ -1,5 +1,5 @@
 use chrono::NaiveDateTime;
-use diesel::{AsChangeset, Identifiable, Insertable, Queryable, Selectable, deserialize::FromSqlRow, expression::AsExpression, sql_types::SmallInt};
+use diesel::{AsChangeset, Identifiable, Insertable, Queryable, Selectable};
 use serde::Deserialize;
 use sui_field_count::FieldCount;
 
@@ -93,18 +93,18 @@ pub struct CourtOperationChangeset {
     pub status: i16,
 }
 
-#[derive(Queryable, Selectable, Insertable, Identifiable, Debug)]
+#[derive(Queryable, Selectable, Insertable, Identifiable, FieldCount, Debug)]
 #[diesel(table_name = dispute, primary_key(dispute_id))]
 pub struct Dispute {
     pub dispute_id: String,
     pub contract_id: String,
     pub court_id: String,
-    pub status: DisputeStatus,
+    pub status: i16,
     pub round: i16,
     pub appeals_used: i16,
     pub result: Option<Vec<i32>>,
     pub winner_option: Option<String>,
-    pub cancellation_reason: Option<DisputeCancellationReason>,
+    pub cancellation_reason: Option<i16>,
     pub max_appeals: i16,
     pub initiator: String,
     pub options: Vec<String>,
@@ -130,34 +130,23 @@ pub struct Dispute {
     pub event_digest: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, AsExpression, FromSqlRow)]
-#[diesel(sql_type = SmallInt)]
-#[repr(i16)]
-pub enum DisputeStatus {
-    Response = 1,
-    Draw = 2,
-    Active = 3,
-    Tie = 4,
-    Tallied = 5,
-    Completed = 6,
-    CompletedOneSided = 7,
-    Cancelled = 8,
-    Censored = 9,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, AsExpression, FromSqlRow)]
-#[diesel(sql_type = SmallInt)]
-#[repr(i16)]
-pub enum DisputeCancellationReason {
-    NivstersNotDrawn = 1,
-    VotesNotCounted = 2,
-    UnresolvedTie = 3,
-}
-
-#[derive(Queryable, Selectable, Insertable, Identifiable, Debug)]
+#[derive(Queryable, Selectable, Identifiable, Debug)]
 #[diesel(table_name = dispute_event, primary_key(id))]
 pub struct DisputeEvent {
     pub id: i64,
+    pub dispute_id: String,
+    pub event_type: i16,
+    pub sender: String,
+    pub checkpoint: i64,
+    pub checkpoint_timestamp_ms: i64,
+    pub package: String,
+    pub digest: String,
+    pub event_digest: String,
+}
+
+#[derive(Deserialize, Insertable)]
+#[diesel(table_name = dispute_event)]
+pub struct NewDisputeEvent {
     pub dispute_id: String,
     pub event_type: i16,
     pub sender: String,
@@ -178,10 +167,25 @@ pub struct DisputeNivster {
     pub stake: i64,
 }
 
-#[derive(Queryable, Selectable, Insertable, Identifiable, Debug)]
+#[derive(Queryable, Selectable, Identifiable, Debug)]
 #[diesel(table_name = dispute_payment, primary_key(id))]
 pub struct DisputePayment {
     pub id: i64,
+    pub dispute_id: String,
+    pub party: String,
+    pub amount: i64,
+    pub payment_type: i16,
+    pub sender: String,
+    pub checkpoint: i64,
+    pub checkpoint_timestamp_ms: i64,
+    pub package: String,
+    pub digest: String,
+    pub event_digest: String,
+}
+
+#[derive(Deserialize, Insertable)]
+#[diesel(table_name = dispute_payment)]
+pub struct NewDisputePayment {
     pub dispute_id: String,
     pub party: String,
     pub amount: i64,

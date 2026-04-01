@@ -150,4 +150,73 @@ pub mod nivra {
             const NAME: &'static str = "WorkerPoolEvent";
         }
     }
+
+    pub mod dispute {
+        use super::*;
+
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        pub struct Schedule {
+            pub round_init_ms: u64,
+            pub response_period_ms: u64,
+            pub draw_period_ms: u64,
+            pub evidence_period_ms: u64,
+            pub voting_period_ms: u64,
+            pub appeal_period_ms: u64,
+            pub evidence_swap: u64,
+        }
+
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        pub struct Economics {
+            pub init_nivster_count: u64,
+            pub sanction_model: u64,
+            pub coefficient: u64,
+            pub dispute_fee: u64,
+            pub treasury_share: u64,
+            pub treasury_share_nvr: u64,
+            pub empty_vote_penalty: u64,
+        }
+
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        pub struct DisputeCreatedEvent {
+            pub dispute: ObjectID,
+            pub contract: ObjectID,
+            pub court: ObjectID,
+            pub max_appeals: u8,
+            pub initiator: Address,
+            pub options: Vec<String>,
+            pub parties: Vec<Address>,
+            pub schedule: Schedule,
+            pub economics: Economics,
+        }
+
+        impl MoveStruct for DisputeCreatedEvent {
+            const MODULE: &'static str = "dispute";
+            const NAME: &'static str = "DisputeCreatedEvent";
+        }
+
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        pub struct DisputePaymentEvent {
+            pub dispute: ObjectID,
+            pub amount: u64,
+            pub party: Address,
+            pub event_type: u64,
+        }
+
+        impl MoveStruct for DisputePaymentEvent {
+            const MODULE: &'static str = "dispute";
+            const NAME: &'static str = "DisputePaymentEvent";
+        }
+
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        pub struct NivsterSelectionEvent {
+            pub dispute: ObjectID,
+            pub nivster: Address,
+            pub locked_amount: u64,
+        }
+
+        impl MoveStruct for NivsterSelectionEvent {
+            const MODULE: &'static str = "dispute";
+            const NAME: &'static str = "NivsterSelectionEvent";
+        }
+    }
 }

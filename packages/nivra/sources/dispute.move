@@ -130,7 +130,6 @@ public struct DisputeCreatedEvent has copy, drop {
     parties: vector<address>,
     schedule: Schedule,
     economics: Economics,
-    operation: Operation,
 }
 
 /// Dispute payment logging event.
@@ -139,13 +138,11 @@ public struct DisputePaymentEvent has copy, drop {
     amount: u64,
     party: address,
     event_type: u64,
-    timestamp: u64,
 }
 
 public struct NivsterSelectionEvent has copy, drop {
     dispute: ID,
     nivster: address,
-    reselected: bool,
     locked_amount: u64,
 }
 
@@ -701,7 +698,6 @@ public(package) fun share_dispute(
         parties,
         schedule: dispute.schedule,
         economics: dispute.economics,
-        operation: dispute.operation,
     });
 
     transfer::share_object(dispute);
@@ -786,7 +782,6 @@ public(package) fun register_payment(
         amount,
         party,
         event_type,
-        timestamp,
     });
 }
 
@@ -810,7 +805,6 @@ public(package) fun register_refund(
         amount,
         party,
         event_type: dispute_refund(),
-        timestamp,
     });
 }
 
@@ -866,7 +860,6 @@ public(package) fun add_voter(
     event::emit(NivsterSelectionEvent {
         dispute: object::id(dispute),
         nivster,
-        reselected: idx.is_some(),
         locked_amount: stake,
     });
 }
