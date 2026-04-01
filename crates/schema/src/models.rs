@@ -241,6 +241,7 @@ pub struct NewBalanceEvent {
 pub struct WorkerPool {
     pub court: String,
     pub nivster: String,
+    pub active: bool,
 }
 
 #[derive(Queryable, Selectable, Insertable, Identifiable, Debug)]

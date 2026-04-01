@@ -188,6 +188,7 @@ diesel::table! {
     worker_pool (court, nivster) {
         court -> Text,
         nivster -> Text,
+        active -> Bool,
     }
 }
 

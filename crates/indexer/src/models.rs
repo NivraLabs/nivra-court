@@ -142,7 +142,6 @@ pub mod nivra {
         pub struct WorkerPoolEvent {
             pub court: ObjectID,
             pub nivster: Address,
-            pub entry: bool,
         }
 
         impl MoveStruct for WorkerPoolEvent {

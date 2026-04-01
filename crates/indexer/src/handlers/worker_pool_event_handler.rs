@@ -29,7 +29,7 @@ impl WorkerPoolEventHandler {
 #[async_trait]
 impl Processor for WorkerPoolEventHandler {
     const NAME: &'static str = "worker_pool_event_handler";
-    type Value = WorkerPoolEvent;
+    type Value = WorkerPool;
 
     async fn process(&self, checkpoint: &Arc<Checkpoint>) -> anyhow::Result<Vec<Self::Value>> {
         let mut results = vec![];
@@ -48,7 +48,13 @@ impl Processor for WorkerPoolEventHandler {
                 }
 
                 let event: WorkerPoolEvent = bcs::from_bytes(&ev.contents)?;
-                results.push(event);
+                let data = WorkerPool { 
+                    court: event.court.to_string(), 
+                    nivster: event.nivster.to_string(), 
+                    active: true, 
+                };
+
+                results.push(data);
             }
         }
 
@@ -66,29 +72,18 @@ impl Handler for WorkerPoolEventHandler {
     }
 
     async fn commit<'a>(&self, batch: &Self::Batch, conn: &mut Connection<'a>) -> anyhow::Result<usize> {
-        let mut rows_affected = 0;
-
-        for worker_pool_event in batch.iter() {
-            if worker_pool_event.entry {
-                diesel::insert_into(worker_pool::table)
-                    .values(WorkerPool { 
-                        court: worker_pool_event.court.to_string(), 
-                        nivster: worker_pool_event.nivster.to_string(), 
-                    })
-                    .on_conflict_do_nothing()
-                    .execute(conn)
-                    .await?;
-            } else {
-                diesel::delete(worker_pool::table.find((
-                    worker_pool_event.court.to_string(),
-                    worker_pool_event.nivster.to_string()
-                )))
-                .execute(conn)
-                .await?;
-            }
-
-            rows_affected += 1;
-        }
+        let rows_affected = diesel::insert_into(worker_pool::table)
+            .values(batch)
+            .on_conflict((
+                worker_pool::court,
+                worker_pool::nivster,
+            ))
+            .do_update()
+            .set(
+                worker_pool::active.eq(diesel::dsl::not(worker_pool::active))
+            )
+            .execute(conn)
+            .await?;
 
         Ok(rows_affected)
     }

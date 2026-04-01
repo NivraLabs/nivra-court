@@ -174,7 +174,6 @@ public struct BalanceEvent has copy, drop {
 public struct WorkerPoolEvent has copy, drop {
     court: ID,
     nivster: address,
-    entry: bool,
 }
 
 public struct CourtCreatedEvent has copy, drop {
@@ -259,7 +258,6 @@ public fun stake(
         event::emit(WorkerPoolEvent {
             court: object::id(court),
             nivster: ctx.sender(),
-            entry: true,
         });
     };
 
@@ -339,7 +337,6 @@ public fun join_worker_pool(
     event::emit(WorkerPoolEvent {
         court: object::id(court),
         nivster: ctx.sender(),
-        entry: true,
     });
 }
 
@@ -359,7 +356,6 @@ public fun leave_worker_pool(
     event::emit(WorkerPoolEvent {
         court: object::id(court),
         nivster: ctx.sender(),
-        entry: false,
     });
 }
 
@@ -1230,7 +1226,6 @@ fun random_nivster_selection(
             event::emit(WorkerPoolEvent {
                 court: object::id(court),
                 nivster,
-                entry: false,
             });
         };
     });

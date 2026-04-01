@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS worker_pool
 (
     court                       TEXT         REFERENCES court(court_id),
     nivster                     TEXT,
+    active                      BOOLEAN      NOT NULL,
     PRIMARY KEY (court, nivster)
 );
 
