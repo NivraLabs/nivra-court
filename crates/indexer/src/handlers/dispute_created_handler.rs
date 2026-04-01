@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use nivra_schema::constants::{DISPUTE_OPENING_FEE, DISPUTE_STATUS_RESPONSE, START_RESPONSE_PERIOD};
+use nivra_schema::constants::{DISPUTE_OPENING_FEE, START_RESPONSE_PERIOD};
 use nivra_schema::models::{Dispute, NewDisputeEvent, NewDisputePayment};
 use nivra_schema::schema::{dispute, dispute_event, dispute_payment};
 use sui_indexer_alt_framework::pipeline::Processor;
@@ -57,13 +57,7 @@ impl Processor for DisputeCreatedHandler {
                 let data = Dispute { 
                     dispute_id: event.dispute.to_string(), 
                     contract_id: event.contract.to_string(), 
-                    court_id: event.court.to_string(), 
-                    status: DISPUTE_STATUS_RESPONSE, 
-                    round: 0, 
-                    appeals_used: 0, 
-                    result: Option::None, 
-                    winner_option: Option::None, 
-                    cancellation_reason: Option::None, 
+                    court_id: event.court.to_string(),
                     max_appeals: event.max_appeals as i16, 
                     initiator: event.initiator.to_string(), 
                     options: event.options, 
@@ -126,7 +120,9 @@ impl Handler for DisputeCreatedHandler {
 
             dispute_events.push(NewDisputeEvent { 
                 dispute_id: dispute.dispute_id.clone(), 
-                event_type: START_RESPONSE_PERIOD, 
+                event_type: START_RESPONSE_PERIOD,
+                result: Option::None,
+                votes_per_option: Option::None,
                 sender: dispute.sender.clone(), 
                 checkpoint: dispute.checkpoint, 
                 checkpoint_timestamp_ms: dispute.checkpoint_timestamp_ms, 

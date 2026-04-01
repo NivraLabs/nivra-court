@@ -570,7 +570,7 @@ public fun cancel_dispute(
         );
     });
 
-    dispute.cancel_dispute(clock);
+    dispute.cancel_dispute();
 }
 
 public fun resolve_one_sided_dispute(

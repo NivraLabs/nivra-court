@@ -34,6 +34,17 @@ const DISPUTE_STATUS_COMPLETED_ONE_SIDED: u64 = 7;
 const DISPUTE_STATUS_CANCELLED: u64 = 8;
 const DISPUTE_STATUS_CENSORED: u64 = 9;
 
+// Dispute event types.
+const START_RESPONSE_PERIOD: u64 = 1;
+const START_DRAW_PERIOD: u64 = 2;
+const START_NEW_ROUND: u64 = 3;
+const START_TIE_ROUND: u64 = 4;
+const VOTE_FINALIZED: u64 = 5;
+const DISPUTE_CENSORED: u64 = 6;
+const DISPUTE_CANCELLED: u64 = 7;
+const DISPUTE_COMPLETED: u64 = 8;
+const DISPUTE_COMPLETED_ONE_SIDED: u64 = 9;
+
 // Dispute rules.
 const MAX_APPEALS_LIMIT: u8 = 3;
 const MIN_OPTION_COUNT: u64 = 2;
@@ -280,4 +291,40 @@ public fun balance_unlocked_with_penalty(): u8 {
 
 public fun balance_unlocked_with_reward(): u8 {
     BALANCE_UNLOCKED_WITH_REWARD
+}
+
+public fun start_response_period(): u64 {
+    START_RESPONSE_PERIOD
+}
+
+public fun start_draw_period(): u64 {
+    START_DRAW_PERIOD
+}
+
+public fun start_new_round(): u64 {
+    START_NEW_ROUND
+}
+
+public fun start_tie_round(): u64 {
+    START_TIE_ROUND
+}
+
+public fun vote_finalized(): u64 {
+    VOTE_FINALIZED
+}
+
+public fun dispute_censored(): u64 {
+    DISPUTE_CENSORED
+}
+
+public fun dispute_cancelled(): u64 {
+    DISPUTE_CANCELLED
+}
+
+public fun dispute_completed(): u64 {
+    DISPUTE_COMPLETED
+}
+
+public fun dispute_completed_one_sided(): u64 {
+    DISPUTE_COMPLETED_ONE_SIDED
 }

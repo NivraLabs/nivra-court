@@ -217,5 +217,18 @@ pub mod nivra {
             const MODULE: &'static str = "dispute";
             const NAME: &'static str = "NivsterSelectionEvent";
         }
+
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        pub struct DisputeEvent {
+            pub dispute: ObjectID,
+            pub event_type: u64,
+            pub result: Option<String>,
+            pub votes_per_option: Option<Vec<u64>>,
+        }
+
+        impl MoveStruct for DisputeEvent {
+            const MODULE: &'static str = "dispute";
+            const NAME: &'static str = "DisputeEvent";
+        }
     }
 }

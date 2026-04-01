@@ -30,12 +30,10 @@ use nivra::constants::dispute_status_completed_one_sided;
 use nivra::constants::dispute_status_completed;
 use nivra::constants::dispute_status_censored;
 use nivra::registry::Registry;
+use nivra::constants::vote_finalized;
+use nivra::constants::dispute_censored;
 
 // === Constants ===
-// Dispute cancellation reasons.
-const NIVSTERS_NOT_DRAWN: u64 = 1;
-const VOTES_NOT_COUNTED: u64 = 2;
-const UNRESOLVED_TIE: u64 = 3;
 
 // === Errors ===
 const EMaxEvidenceReached: u64 = 1;
@@ -146,43 +144,11 @@ public struct NivsterSelectionEvent has copy, drop {
     locked_amount: u64,
 }
 
-public struct ResponsePeriodEvent has copy, drop {
+public struct DisputeEvent has copy, drop {
     dispute: ID,
-}
-
-public struct DrawPeriodEvent has copy, drop {
-    dispute: ID,
-}
-
-public struct NewRoundEvent has copy, drop {
-    dispute: ID,
-    timestamp: u64,
-    tie_round: bool,
-}
-
-public struct VoteFinalizedEvent has copy, drop {
-    dispute: ID,
+    event_type: u64,
     result: Option<String>,
-    votes_per_option: vector<u64>,
-}
-
-public struct DisputeCancelledEvent has copy, drop {
-    dispute: ID,
-    reason: u64,
-}
-
-public struct DisputeResolvedOneSided has copy, drop {
-    dispute: ID,
-    winner_option: String,
-}
-
-public struct DisputeCompleted has copy, drop {
-    dispute: ID,
-    winner_option: String,
-}
-
-public struct DisputeCensoredEvent has copy, drop {
-    dispute: ID,
+    votes_per_option: Option<vector<u64>>,
 }
 
 // === Method Aliases ===
@@ -284,13 +250,14 @@ public fun finalize_vote(
 
     dispute.winner_option = winner_option_idx;
 
-    event::emit(VoteFinalizedEvent {
+    event::emit(DisputeEvent {
         dispute: object::id(dispute),
+        event_type: vote_finalized(),
         result: winner_option_idx.map!(|idx| {
             let (k, _) = dispute.options.get_entry_by_idx(idx);
             *k
         }),
-        votes_per_option: dispute.result,
+        votes_per_option: option::some(dispute.result),
     });
 }
 
@@ -621,8 +588,11 @@ public fun censor_dispute(
 
     dispute.status = dispute_status_censored();
 
-    event::emit(DisputeCensoredEvent {
+    event::emit(DisputeEvent {
         dispute: object::id(dispute),
+        event_type: dispute_censored(),
+        result: option::none(),
+        votes_per_option: option::none(),
     });
 }
 
@@ -815,8 +785,11 @@ public(package) fun start_response_period(
     dispute.status = dispute_status_response();
     dispute.schedule.round_init_ms = clock.timestamp_ms();
 
-    event::emit(ResponsePeriodEvent {
+    event::emit(DisputeEvent {
         dispute: object::id(dispute),
+        event_type: nivra::constants::start_response_period(),
+        result: option::none(),
+        votes_per_option: option::none(),
     });
 }
 
@@ -824,8 +797,11 @@ public(package) fun start_draw_period(dispute: &mut Dispute, clock: &Clock) {
     dispute.status = dispute_status_draw();
     dispute.schedule.round_init_ms = clock.timestamp_ms();
 
-    event::emit(DrawPeriodEvent { 
+    event::emit(DisputeEvent { 
         dispute: object::id(dispute),
+        event_type: nivra::constants::start_draw_period(),
+        result: option::none(),
+        votes_per_option: option::none(),
     });
 }
 
@@ -880,10 +856,11 @@ public(package) fun start_new_round(
         dispute.winner_option = option::none();
     };
 
-    event::emit(NewRoundEvent {
+    event::emit(DisputeEvent {
         dispute: object::id(dispute),
-        timestamp: dispute.schedule.round_init_ms,
-        tie_round: false,
+        event_type: nivra::constants::start_new_round(),
+        result: option::none(),
+        votes_per_option: option::none(),
     });
 }
 
@@ -901,10 +878,11 @@ public(package) fun start_new_round_tie(
     dispute.result = vector[];
     dispute.winner_option = option::none();
 
-    event::emit(NewRoundEvent {
+    event::emit(DisputeEvent {
         dispute: object::id(dispute),
-        timestamp: dispute.schedule.round_init_ms,
-        tie_round: true,
+        event_type: nivra::constants::start_tie_round(),
+        result: option::none(),
+        votes_per_option: option::none(),
     });
 }
 
@@ -951,42 +929,14 @@ public(package) fun voters_mut(
 
 public(package) fun cancel_dispute(
     dispute: &mut Dispute,
-    clock: &Clock,
 ) {
-    let current_time = clock.timestamp_ms();
-
-    let draw_period_end = dispute.schedule.round_init_ms +
-        dispute.schedule.draw_period_ms;
-
-    let timetable_end = dispute.schedule.round_init_ms + 
-        dispute.schedule.evidence_period_ms + 
-        dispute.schedule.voting_period_ms + 
-        dispute.schedule.appeal_period_ms;
-
-    let untallied = (current_time > timetable_end) && 
-        (dispute.status == dispute_status_active());
-
-    let unresolved_tie = (current_time > timetable_end) && 
-        (dispute.status == dispute_status_tie());
-
-    let no_nivsters_drawn = (current_time > draw_period_end) && 
-        (dispute.status == dispute_status_draw());
-
-    let mut reason = 0;
-
-    if (untallied) {
-        reason = VOTES_NOT_COUNTED;
-    } else if (unresolved_tie) {
-        reason = UNRESOLVED_TIE;
-    } else if (no_nivsters_drawn) {
-        reason = NIVSTERS_NOT_DRAWN;
-    };
-
     dispute.status = dispute_status_cancelled();
 
-    event::emit(DisputeCancelledEvent { 
+    event::emit(DisputeEvent { 
         dispute: object::id(dispute), 
-        reason,
+        event_type: nivra::constants::dispute_cancelled(),
+        result: option::none(),
+        votes_per_option: option::none(),
     });
 }
 
@@ -1015,9 +965,11 @@ public(package) fun resolve_dispute_one_sided(
         );
     });
 
-    event::emit(DisputeResolvedOneSided {
+    event::emit(DisputeEvent {
         dispute: object::id(dispute),
-        winner_option: *winner_option,
+        event_type: nivra::constants::dispute_completed_one_sided(),
+        result: option::some(*winner_option),
+        votes_per_option: option::none(),
     });
 }
 
@@ -1043,9 +995,11 @@ public(package) fun complete_dispute(
         );
     });
 
-    event::emit(DisputeCompleted {
+    event::emit(DisputeEvent {
         dispute: object::id(dispute),
-        winner_option: *winner_option.borrow(),
+        event_type: nivra::constants::dispute_completed(),
+        result: winner_option,
+        votes_per_option: option::none(),
     });
 }
 
