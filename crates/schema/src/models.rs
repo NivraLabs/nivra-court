@@ -1,5 +1,5 @@
 use chrono::NaiveDateTime;
-use diesel::{Identifiable, Insertable, Queryable, Selectable, deserialize::FromSqlRow, expression::AsExpression, sql_types::SmallInt};
+use diesel::{AsChangeset, Identifiable, Insertable, Queryable, Selectable, deserialize::FromSqlRow, expression::AsExpression, sql_types::SmallInt};
 use sui_field_count::FieldCount;
 
 use crate::schema::{admin_vote, balance_event, court, dispute, dispute_event, dispute_nivster, dispute_payment, evidence, nivster, worker_pool};
@@ -28,6 +28,7 @@ pub struct Court {
     pub ai_court: bool,
     pub response_period_ms: i64,
     pub draw_period_ms: i64,
+    pub evidence_period_ms: i64,
     pub voting_period_ms: i64,
     pub appeal_period_ms: i64,
     pub min_stake: i64,
@@ -39,10 +40,7 @@ pub struct Court {
     pub treasury_share: i16,
     pub treasury_share_nvr: i16,
     pub empty_vote_penalty: i16,
-    pub status: CourtStatus,
-    pub key_servers: Vec<String>,
-    pub public_keys: Vec<String>,
-    pub threshold: i16,
+    pub status: i16,
     pub sender: String,
     pub checkpoint: i64,
     pub checkpoint_timestamp_ms: i64,
@@ -51,12 +49,47 @@ pub struct Court {
     pub event_digest: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, AsExpression, FromSqlRow)]
-#[diesel(sql_type = SmallInt)]
-#[repr(i16)]
-pub enum CourtStatus {
-    Active = 0,
-    Halted = 1,
+#[derive(AsChangeset)]
+#[diesel(table_name = court, primary_key(court_id))]
+pub struct CourtMetadataChangeset {
+    pub court_id: String,
+    pub name: String,
+    pub category: String,
+    pub description: String,
+    pub ai_court: bool,
+}
+
+#[derive(AsChangeset)]
+#[diesel(table_name = court, primary_key(court_id))]
+pub struct CourtTimetableChangeset {
+    pub court_id: String,
+    pub response_period_ms: i64,
+    pub draw_period_ms: i64,
+    pub evidence_period_ms: i64,
+    pub voting_period_ms: i64,
+    pub appeal_period_ms: i64,
+}
+
+#[derive(AsChangeset)]
+#[diesel(table_name = court, primary_key(court_id))]
+pub struct CourtEconomicsChangeset {
+    pub court_id: String,
+    pub min_stake: i64,
+    pub reputation_requirement: i16,
+    pub init_nivster_count: i16,
+    pub sanction_model: i16,
+    pub coefficient: i16,
+    pub dispute_fee: i64,
+    pub treasury_share: i16,
+    pub treasury_share_nvr: i16,
+    pub empty_vote_penalty: i16,
+}
+
+#[derive(AsChangeset)]
+#[diesel(table_name = court, primary_key(court_id))]
+pub struct CourtOperationChangeset {
+    pub court_id: String,
+    pub status: i16,
 }
 
 #[derive(Queryable, Selectable, Insertable, Identifiable, Debug)]
@@ -94,9 +127,6 @@ pub struct Dispute {
     pub treasury_share: i16,
     pub treasury_share_nvr: i16,
     pub empty_vote_penalty: i16,
-    pub key_servers: Vec<String>,
-    pub public_keys: Vec<String>,
-    pub threshold: i16,
     pub sender: String,
     pub checkpoint: i64,
     pub checkpoint_timestamp_ms: i64,

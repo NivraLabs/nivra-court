@@ -58,9 +58,6 @@ diesel::table! {
         treasury_share_nvr -> Int2,
         empty_vote_penalty -> Int2,
         status -> Int2,
-        key_servers -> Array<Nullable<Text>>,
-        public_keys -> Array<Nullable<Text>>,
-        threshold -> Int2,
         sender -> Text,
         checkpoint -> Int8,
         timestamp -> Timestamp,
@@ -99,9 +96,6 @@ diesel::table! {
         treasury_share -> Int2,
         treasury_share_nvr -> Int2,
         empty_vote_penalty -> Int2,
-        key_servers -> Array<Nullable<Text>>,
-        public_keys -> Array<Nullable<Text>>,
-        threshold -> Int2,
         sender -> Text,
         checkpoint -> Int8,
         timestamp -> Timestamp,
@@ -183,6 +177,20 @@ diesel::table! {
 }
 
 diesel::table! {
+    watermarks (pipeline) {
+        pipeline -> Text,
+        epoch_hi_inclusive -> Int8,
+        checkpoint_hi_inclusive -> Int8,
+        tx_hi -> Int8,
+        timestamp_ms_hi_inclusive -> Int8,
+        reader_lo -> Int8,
+        pruner_timestamp -> Timestamp,
+        pruner_hi -> Int8,
+        chain_id -> Nullable<Bytea>,
+    }
+}
+
+diesel::table! {
     worker_pool (court, nivster) {
         court -> Text,
         nivster -> Text,
@@ -211,5 +219,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     dispute_payment,
     evidence,
     nivster,
+    watermarks,
     worker_pool,
 );

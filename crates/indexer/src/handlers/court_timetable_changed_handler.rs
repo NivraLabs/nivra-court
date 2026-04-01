@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use diesel::ExpressionMethods;
-use nivra_schema::schema::admin_vote;
+use nivra_schema::models::CourtTimetableChangeset;
+use nivra_schema::schema::court;
 use sui_indexer_alt_framework::pipeline::Processor;
 use sui_indexer_alt_framework::pipeline::sequential::Handler;
 use sui_indexer_alt_framework::types::full_checkpoint_content::Checkpoint;
@@ -12,24 +12,24 @@ use diesel_async::RunQueryDsl;
 
 use crate::NivraEnv;
 use crate::handlers::has_nivra_events;
-use crate::models::nivra::registry::AdminVoteFinalizedEvent;
+use crate::models::nivra::court::CourtTimetableChanged;
 use crate::traits::MoveStruct;
 
 
-pub struct AdminVoteFinalizedHandler {
+pub struct CourtTimetableChangedHandler {
     env: NivraEnv,
 }
 
-impl AdminVoteFinalizedHandler {
+impl CourtTimetableChangedHandler {
     pub fn new(env: NivraEnv) -> Self {
         Self { env }
     }
 }
 
 #[async_trait]
-impl Processor for AdminVoteFinalizedHandler {
-    const NAME: &'static str = "admin_vote_finalized_handler";
-    type Value = String;
+impl Processor for CourtTimetableChangedHandler {
+    const NAME: &'static str = "court_timetable_changed_handler";
+    type Value = CourtTimetableChangeset;
 
     async fn process(&self, checkpoint: &Arc<Checkpoint>) -> anyhow::Result<Vec<Self::Value>> {
         let mut results = vec![];
@@ -42,13 +42,22 @@ impl Processor for AdminVoteFinalizedHandler {
                 continue;
             };
 
-            for (_, ev) in events.data.iter().enumerate() {
-                if !AdminVoteFinalizedEvent::matches_event_type(&ev.type_, self.env) {
+            for ev in events.data.iter() {
+                if !CourtTimetableChanged::matches_event_type(&ev.type_, self.env) {
                     continue;
                 }
 
-                let event: AdminVoteFinalizedEvent = bcs::from_bytes(&ev.contents)?;
-                results.push(event.vote.to_string());
+                let event: CourtTimetableChanged = bcs::from_bytes(&ev.contents)?;
+                let data = CourtTimetableChangeset { 
+                    court_id: event.court.to_string(), 
+                    response_period_ms: event.timetable.response_period_ms as i64, 
+                    draw_period_ms: event.timetable.draw_period_ms as i64, 
+                    evidence_period_ms: event.timetable.evidence_period_ms as i64, 
+                    voting_period_ms: event.timetable.voting_period_ms as i64, 
+                    appeal_period_ms: event.timetable.appeal_period_ms as i64, 
+                };
+
+                results.push(data);
             }
         }
 
@@ -57,7 +66,7 @@ impl Processor for AdminVoteFinalizedHandler {
 }
 
 #[async_trait]
-impl Handler for AdminVoteFinalizedHandler {
+impl Handler for CourtTimetableChangedHandler {
     type Store = Db;
     type Batch = Vec<Self::Value>;
 
@@ -68,9 +77,9 @@ impl Handler for AdminVoteFinalizedHandler {
     async fn commit<'a>(&self, batch: &Self::Batch, conn: &mut Connection<'a>) -> anyhow::Result<usize> {
         let mut updated = 0;
 
-        for vote_id in batch.iter() {
-            diesel::update(admin_vote::table.find(vote_id))
-                .set(admin_vote::vote_enforced.eq(true))
+        for metadata_changeset in batch.iter() {
+            diesel::update(court::table.find(metadata_changeset.court_id.clone()))
+                .set(metadata_changeset)
                 .execute(conn)
                 .await?;
 

@@ -210,7 +210,7 @@ public struct CourtCreatedEvent has copy, drop {
     metadata: Metadata,
     timetable: Timetable,
     economics: Economics,
-    operation: Operation,
+    status: u8,
 }
 
 public struct CourtMetadataChanged has copy, drop {
@@ -230,7 +230,7 @@ public struct CourtEconomicsChanged has copy, drop {
 
 public struct CourtOperationChanged has copy, drop {
     court: ID,
-    operation: Operation,
+    status: u8,
 }
 
 // === Method Aliases ===
@@ -1032,6 +1032,7 @@ public fun create_court(
         reward_pool: balance::zero<SUI>(),
     };
     let court_id = object::id(&court);
+    let status = court.operation.status;
 
     registry.register_court(court_id);
     transfer::share_object(court);
@@ -1041,7 +1042,7 @@ public fun create_court(
         metadata,
         timetable,
         economics,
-        operation,
+        status,
     });
 }
 
@@ -1109,7 +1110,7 @@ public fun change_operation(
 
     event::emit(CourtOperationChanged { 
         court: object::id(court), 
-        operation, 
+        status: court.operation.status,
     });
 }
 
