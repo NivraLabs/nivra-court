@@ -41,6 +41,12 @@ use nivra::dispute::VoterDetails;
 use nivra::constants::max_init_nivster_count;
 use nivra::constants::max_voter_count;
 use nivra::constants::current_version;
+use nivra::constants::balance_deposit;
+use nivra::constants::balance_withdrawal;
+use nivra::constants::balance_locked;
+use nivra::constants::balance_unlocked;
+use nivra::constants::balance_unlocked_with_penalty;
+use nivra::constants::balance_unlocked_with_reward;
 
 // === Constants ===
 // Sanction models
@@ -155,54 +161,19 @@ public struct Stake has drop, store {
 }
 
 // === Events ===
-public struct BalanceDepositEvent has copy, drop {
-    court: ID,
+public struct BalanceEvent has copy, drop {
     nivster: address,
-    amount_nvr: u64,
-}
-
-public struct BalanceWithdrawalEvent has copy, drop {
     court: ID,
-    nivster: address,
+    event_type: u8,
     amount_nvr: u64,
     amount_sui: u64,
-}
-
-public struct BalanceLockedEvent has copy, drop {
-    court: ID,
-    nivster: address,
-    locked_nvr: u64,
-    dispute_id: ID,
-}
-
-public struct BalanceUnlockEvent has copy, drop {
-    court: ID,
-    nivster: address,
-    unlocked_nvr: u64,
-    dispute_id: ID,
-}
-
-public struct BalancePenaltyEvent has copy, drop {
-    court: ID,
-    nivster: address,
-    amount_nvr: u64,
-    unlocked_nvr: u64,
-    dispute_id: ID,
-}
-
-public struct BalanceRewardEvent has copy, drop {
-    court: ID,
-    nivster: address,
-    amount_nvr: u64,
-    amount_sui: u64,
-    unlocked_nvr: u64,
-    dispute_id: ID,
+    lock_nvr: u64,
+    dispute_id: Option<ID>,              
 }
 
 public struct WorkerPoolEvent has copy, drop {
     court: ID,
     nivster: address,
-    entry: bool,
 }
 
 public struct CourtCreatedEvent has copy, drop {
@@ -210,7 +181,7 @@ public struct CourtCreatedEvent has copy, drop {
     metadata: Metadata,
     timetable: Timetable,
     economics: Economics,
-    operation: Operation,
+    status: u8,
 }
 
 public struct CourtMetadataChanged has copy, drop {
@@ -230,7 +201,7 @@ public struct CourtEconomicsChanged has copy, drop {
 
 public struct CourtOperationChanged has copy, drop {
     court: ID,
-    operation: Operation,
+    status: u8,
 }
 
 // === Method Aliases ===
@@ -280,17 +251,26 @@ public fun stake(
             *stake.worker_pool_pos.borrow(), 
             deposit_amount
         );
-    } else {
+    } else if (!court.worker_pool.is_full()) {
         let pos = court.worker_pool.push_back(ctx.sender(), stake.amount);
         stake.worker_pool_pos = option::some(pos);
+
+        event::emit(WorkerPoolEvent {
+            court: object::id(court),
+            nivster: ctx.sender(),
+        });
     };
 
     court.stake_pool.join(assets.into_balance());
 
-    event::emit(BalanceDepositEvent {
-        court: object::id(court),
+    event::emit(BalanceEvent {
         nivster: ctx.sender(),
+        court: object::id(court),
+        event_type: balance_deposit(),
         amount_nvr: deposit_amount,
+        amount_sui: 0,
+        lock_nvr: 0,
+        dispute_id: option::none(),
     });
 }
 
@@ -326,11 +306,14 @@ public fun withdraw(
     let nvr = court.stake_pool.split(amount_nvr).into_coin(ctx);
     let sui = court.reward_pool.split(amount_sui).into_coin(ctx);
 
-    event::emit(BalanceWithdrawalEvent {
-        court: object::id(court),
+    event::emit(BalanceEvent {
         nivster: ctx.sender(),
+        court: object::id(court),
+        event_type: balance_withdrawal(),
         amount_nvr,
         amount_sui,
+        lock_nvr: 0,
+        dispute_id: option::none(),
     });
     
     (nvr, sui)
@@ -354,7 +337,6 @@ public fun join_worker_pool(
     event::emit(WorkerPoolEvent {
         court: object::id(court),
         nivster: ctx.sender(),
-        entry: true,
     });
 }
 
@@ -374,7 +356,6 @@ public fun leave_worker_pool(
     event::emit(WorkerPoolEvent {
         court: object::id(court),
         nivster: ctx.sender(),
-        entry: false,
     });
 }
 
@@ -570,12 +551,14 @@ public fun cancel_dispute(
             sum + deposit.amount()
         });
 
-        transfer::public_transfer(
-            court.reward_pool.split(total_deposit_amount).into_coin(ctx),
-            *party
-        );
+        if (total_deposit_amount > 0) {
+            transfer::public_transfer(
+                court.reward_pool.split(total_deposit_amount).into_coin(ctx),
+                *party
+            );
             
-        dispute.register_refund(total_deposit_amount, *party, clock);
+            dispute.register_refund(total_deposit_amount, *party, clock);
+        };
     });
 
     // Refund the nivsters.
@@ -587,7 +570,7 @@ public fun cancel_dispute(
         );
     });
 
-    dispute.cancel_dispute(clock);
+    dispute.cancel_dispute();
 }
 
 public fun resolve_one_sided_dispute(
@@ -1030,6 +1013,7 @@ public fun create_court(
         reward_pool: balance::zero<SUI>(),
     };
     let court_id = object::id(&court);
+    let status = court.operation.status;
 
     registry.register_court(court_id);
     transfer::share_object(court);
@@ -1039,7 +1023,7 @@ public fun create_court(
         metadata,
         timetable,
         economics,
-        operation,
+        status,
     });
 }
 
@@ -1107,7 +1091,7 @@ public fun change_operation(
 
     event::emit(CourtOperationChanged { 
         court: object::id(court), 
-        operation, 
+        status: court.operation.status,
     });
 }
 
@@ -1206,8 +1190,7 @@ fun random_nivster_selection(
         court.remove_from_worker_pool(nivster, stake_in_pool);
 
         // Narrow the selection range by nivster's stake amount.
-        let stake = court.stakes.borrow(nivster);
-        sum = sum - stake.amount;
+        sum = sum - stake_in_pool;
 
         nivsters_selected.push_back(nivster);
     };
@@ -1224,11 +1207,14 @@ fun random_nivster_selection(
         stake.amount = stake.amount - locked_amount;
         stake.locked_amount = stake.locked_amount + locked_amount;
 
-        event::emit(BalanceLockedEvent {
-            court: court_id,
+        event::emit(BalanceEvent {
             nivster,
-            locked_nvr: locked_amount,
-            dispute_id: object::id(dispute),
+            court: court_id,
+            event_type: balance_locked(),
+            amount_nvr: 0,
+            amount_sui: 0,
+            lock_nvr: locked_amount,
+            dispute_id: option::some(object::id(dispute)),
         });
 
         dispute.add_voter(nivster, locked_amount);
@@ -1240,7 +1226,6 @@ fun random_nivster_selection(
             event::emit(WorkerPoolEvent {
                 court: object::id(court),
                 nivster,
-                entry: false,
             });
         };
     });
@@ -1304,11 +1289,14 @@ fun unlock_stake(
         );
     };
 
-    event::emit(BalanceUnlockEvent {
-        court: object::id(court),
+    event::emit(BalanceEvent {
         nivster: key,
-        unlocked_nvr: amount,
-        dispute_id,
+        court: object::id(court),
+        event_type: balance_unlocked(),
+        amount_nvr: 0,
+        amount_sui: 0,
+        lock_nvr: amount,
+        dispute_id: option::some(dispute_id),
     });
 }
 
@@ -1334,12 +1322,14 @@ fun unlock_stake_with_penalty(
 
     registry.register_case_lost(nivster, penalty);
 
-    event::emit(BalancePenaltyEvent {
+    event::emit(BalanceEvent {
+        nivster,
         court: object::id(court),
-        nivster: nivster,
+        event_type: balance_unlocked_with_penalty(),
         amount_nvr: penalty,
-        unlocked_nvr: amount,
-        dispute_id,
+        amount_sui: 0,
+        lock_nvr: amount,
+        dispute_id: option::some(dispute_id),
     });
 }
 
@@ -1367,13 +1357,14 @@ fun unlock_stake_with_rewards(
 
     registry.register_case_won(nivster, reward_nvr, reward_sui);
 
-    event::emit(BalanceRewardEvent {
+    event::emit(BalanceEvent {
+        nivster,
         court: object::id(court),
-        nivster: nivster,
+        event_type: balance_unlocked_with_reward(),
         amount_nvr: reward_nvr,
         amount_sui: reward_sui,
-        unlocked_nvr: amount,
-        dispute_id,
+        lock_nvr: amount,
+        dispute_id: option::some(dispute_id),
     });
 }
 

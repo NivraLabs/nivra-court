@@ -40,6 +40,10 @@ public fun max_length(): u64 {
     MAX_LENGTH
 }
 
+public fun is_full(worker_pool: &WorkerPool): bool {
+    worker_pool.length == MAX_LENGTH
+}
+
 // === Package Functions ===
 public(package) fun empty(ctx: &mut TxContext): WorkerPool {
     let mut worker_pool = WorkerPool { 

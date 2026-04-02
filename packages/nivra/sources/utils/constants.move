@@ -14,6 +14,12 @@ const MIN_VOTE_DECAY_MS: u64 = 15768000000; // 6 months
 // Admin vote rules.
 const MAX_ADMIN_DESC_LENGTH: u64 = 2000;
 
+// Admin vote event types.
+const ADD_ADMIN_VOTE: u8 = 1;
+const BLACKLIST_ADMIN_VOTE: u8 = 2;
+const CHANGE_TREASURY_VOTE: u8 = 3;
+const CHANGE_THRESHOLD_VOTE: u8 = 4;
+
 // Nivster rules.
 const REPUTATION_THRESHOLD: u64 = 3;
 
@@ -26,6 +32,18 @@ const DISPUTE_STATUS_TALLIED: u64 = 5;
 const DISPUTE_STATUS_COMPLETED: u64 = 6;
 const DISPUTE_STATUS_COMPLETED_ONE_SIDED: u64 = 7;
 const DISPUTE_STATUS_CANCELLED: u64 = 8;
+const DISPUTE_STATUS_CENSORED: u64 = 9;
+
+// Dispute event types.
+const START_RESPONSE_PERIOD: u64 = 1;
+const START_DRAW_PERIOD: u64 = 2;
+const START_NEW_ROUND: u64 = 3;
+const START_TIE_ROUND: u64 = 4;
+const VOTE_FINALIZED: u64 = 5;
+const DISPUTE_CENSORED: u64 = 6;
+const DISPUTE_CANCELLED: u64 = 7;
+const DISPUTE_COMPLETED: u64 = 8;
+const DISPUTE_COMPLETED_ONE_SIDED: u64 = 9;
 
 // Dispute rules.
 const MAX_APPEALS_LIMIT: u8 = 3;
@@ -48,6 +66,14 @@ const MAX_DESCRIPTION_LENGTH: u64 = 2000;
 const STATUS_ACTIVE: u8 = 0;
 const STATUS_HALTED: u8 = 1;
 const MAX_INIT_NIVSTER_COUNT: u64 = 11;
+
+// Court balance event types.
+const BALANCE_DEPOSIT: u8 = 1;
+const BALANCE_WITHDRAWAL: u8 = 2;
+const BALANCE_LOCKED: u8 = 3;
+const BALANCE_UNLOCKED: u8 = 4;
+const BALANCE_UNLOCKED_WITH_PENALTY: u8 = 5;
+const BALANCE_UNLOCKED_WITH_REWARD: u8 = 6;
 
 // Evidence rules.
 const MAX_EVIDENCE_DESCRIPTION_LENGTH: u64 = 2000;
@@ -221,4 +247,84 @@ public fun max_voter_count(): u64 {
 
 public fun max_init_nivster_count(): u64 {
     MAX_INIT_NIVSTER_COUNT
+}
+
+public fun add_admin_vote(): u8 {
+    ADD_ADMIN_VOTE
+}
+
+public fun blacklist_admin_vote(): u8 {
+    BLACKLIST_ADMIN_VOTE
+}
+
+public fun change_treasury_vote(): u8 {
+    CHANGE_TREASURY_VOTE
+}
+
+public fun change_threshold_vote(): u8 {
+    CHANGE_THRESHOLD_VOTE
+}
+
+public fun dispute_status_censored(): u64 {
+    DISPUTE_STATUS_CENSORED
+}
+
+public fun balance_deposit(): u8 {
+    BALANCE_DEPOSIT
+}
+
+public fun balance_withdrawal(): u8 {
+    BALANCE_WITHDRAWAL
+}
+
+public fun balance_locked(): u8 {
+    BALANCE_LOCKED
+}
+
+public fun balance_unlocked(): u8 {
+    BALANCE_UNLOCKED
+}
+
+public fun balance_unlocked_with_penalty(): u8 {
+    BALANCE_UNLOCKED_WITH_PENALTY
+}
+
+public fun balance_unlocked_with_reward(): u8 {
+    BALANCE_UNLOCKED_WITH_REWARD
+}
+
+public fun start_response_period(): u64 {
+    START_RESPONSE_PERIOD
+}
+
+public fun start_draw_period(): u64 {
+    START_DRAW_PERIOD
+}
+
+public fun start_new_round(): u64 {
+    START_NEW_ROUND
+}
+
+public fun start_tie_round(): u64 {
+    START_TIE_ROUND
+}
+
+public fun vote_finalized(): u64 {
+    VOTE_FINALIZED
+}
+
+public fun dispute_censored(): u64 {
+    DISPUTE_CENSORED
+}
+
+public fun dispute_cancelled(): u64 {
+    DISPUTE_CANCELLED
+}
+
+public fun dispute_completed(): u64 {
+    DISPUTE_COMPLETED
+}
+
+public fun dispute_completed_one_sided(): u64 {
+    DISPUTE_COMPLETED_ONE_SIDED
 }

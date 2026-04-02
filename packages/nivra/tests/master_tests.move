@@ -7,7 +7,7 @@ use sui::test_scenario::{Self, Scenario};
 use sui::coin::{Self, Coin};
 use sui::clock::{Self, Clock};
 use sui::random::{Self, Random};
-use token::nvr::NVR;
+use nvr::nvr::NVR;
 use sui::sui::SUI;
 use std::string;
 use nivra::registry::{Self, Registry};
@@ -241,7 +241,40 @@ fun draw_nivsters(scenario: &mut Scenario, clock: &Clock) {
 // Tests
 // =============================================================================
 
-// --- 1. Staking and withdrawal ---
+#[test]
+fun test_worker_pool_leave() {
+    let mut scenario = setup_registry();
+    setup_court(&mut scenario, 1);
+
+    let mut i = 0;
+    while(i < 100) {
+        stake_nvr(&mut scenario, sui::address::from_u256(1000 + i), MIN_STAKE * (i as u64 + 1));
+        i = i + 1;
+    };
+
+    i = i - 1;
+
+    while (i > 0) {
+        leave_worker_pool(&mut scenario, sui::address::from_u256(1000 + i));
+        i = i - 1;
+    };
+
+    leave_worker_pool(&mut scenario, sui::address::from_u256(1000 ));
+
+    while(i < 100) {
+        stake_nvr(&mut scenario, sui::address::from_u256(1000 + i), MIN_STAKE * (i as u64 + 1));
+        i = i + 1;
+    };
+
+    i = 0;
+
+    while (i < 100) {
+        leave_worker_pool(&mut scenario, sui::address::from_u256(1000 + i));
+        i = i + 1;
+    };
+
+    scenario.end();
+}
 
 #[test]
 fun test_stake_and_withdraw() {

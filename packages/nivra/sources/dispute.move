@@ -28,12 +28,12 @@ use nivra::constants::dispute_status_cancelled;
 use nivra::constants::dispute_refund;
 use nivra::constants::dispute_status_completed_one_sided;
 use nivra::constants::dispute_status_completed;
+use nivra::constants::dispute_status_censored;
+use nivra::registry::Registry;
+use nivra::constants::vote_finalized;
+use nivra::constants::dispute_censored;
 
 // === Constants ===
-// Dispute cancellation reasons.
-const NIVSTERS_NOT_DRAWN: u64 = 1;
-const VOTES_NOT_COUNTED: u64 = 2;
-const UNRESOLVED_TIE: u64 = 3;
 
 // === Errors ===
 const EMaxEvidenceReached: u64 = 1;
@@ -48,6 +48,7 @@ const EInvalidDerivedKeyAmount: u64 = 9;
 const ENotEnoughKeys: u64 = 10;
 const EAlreadyFinalized: u64 = 11;
 const EInvalidOption: u64 = 12;
+const EDisputeAlreadyResolved: u64 = 13;
 
 // === Structs ===
 public struct Dispute has key {
@@ -127,7 +128,6 @@ public struct DisputeCreatedEvent has copy, drop {
     parties: vector<address>,
     schedule: Schedule,
     economics: Economics,
-    operation: Operation,
 }
 
 /// Dispute payment logging event.
@@ -136,58 +136,19 @@ public struct DisputePaymentEvent has copy, drop {
     amount: u64,
     party: address,
     event_type: u64,
-    timestamp: u64,
 }
 
 public struct NivsterSelectionEvent has copy, drop {
     dispute: ID,
     nivster: address,
-    reselected: bool,
     locked_amount: u64,
 }
 
-public struct ResponsePeriodEvent has copy, drop {
+public struct DisputeEvent has copy, drop {
     dispute: ID,
-    round: u64,
-    timestamp: u64,
-}
-
-public struct DrawPeriodEvent has copy, drop {
-    dispute: ID,
-    round: u64,
-    timestamp: u64,
-}
-
-public struct NewRoundEvent has copy, drop {
-    dispute: ID,
-    round: u64,
-    timestamp: u64,
-    tie_round: bool,
-}
-
-public struct VoteFinalizedEvent has copy, drop {
-    dispute: ID,
-    round: u64,
+    event_type: u64,
     result: Option<String>,
-    options: vector<String>,
-    votes_per_option: vector<u64>,
-}
-
-public struct DisputeCancelledEvent has copy, drop {
-    dispute: ID,
-    reason: u64,
-}
-
-public struct DisputeResolvedOneSided has copy, drop {
-    dispute: ID,
-    winner_party: address,
-    winner_option: String,
-}
-
-public struct DisputeCompleted has copy, drop {
-    dispute: ID,
-    winner_party: address,
-    winner_option: String,
+    votes_per_option: Option<vector<u64>>,
 }
 
 // === Method Aliases ===
@@ -289,15 +250,14 @@ public fun finalize_vote(
 
     dispute.winner_option = winner_option_idx;
 
-    event::emit(VoteFinalizedEvent {
+    event::emit(DisputeEvent {
         dispute: object::id(dispute),
-        round: dispute.round,
+        event_type: vote_finalized(),
         result: winner_option_idx.map!(|idx| {
             let (k, _) = dispute.options.get_entry_by_idx(idx);
             *k
         }),
-        options: dispute.options.keys(),
-        votes_per_option: dispute.result,
+        votes_per_option: option::some(dispute.result),
     });
 }
 
@@ -445,7 +405,9 @@ public fun is_incomplete(dispute: &Dispute, clock: &Clock): bool {
     let no_nivsters_drawn = (current_time > draw_period_end) && 
         (dispute.status == dispute_status_draw());
 
-    no_nivsters_drawn || untallied_or_unresolved_tie
+    let censored = dispute.status == dispute_status_censored();
+
+    no_nivsters_drawn || untallied_or_unresolved_tie || censored
 }
 
 public fun party_failed_payment(dispute: &Dispute, clock: &Clock): bool {
@@ -608,6 +570,32 @@ public fun winner_option_idx(dispute: &Dispute): Option<u64> {
     dispute.winner_option
 }
 
+// === Admin Functions ===
+public fun censor_dispute(
+    dispute: &mut Dispute,
+    registry: &Registry,
+    ctx: &mut TxContext,
+) {
+    assert!(
+        dispute.status != dispute_status_cancelled() &&
+        dispute.status != dispute_status_completed_one_sided() &&
+        dispute.status != dispute_status_completed(), 
+        EDisputeAlreadyResolved
+    );
+
+    registry.validate_version();
+    registry.validate_admin_privileges(ctx);
+
+    dispute.status = dispute_status_censored();
+
+    event::emit(DisputeEvent {
+        dispute: object::id(dispute),
+        event_type: dispute_censored(),
+        result: option::none(),
+        votes_per_option: option::none(),
+    });
+}
+
 // === Package Functions ===
 public(package) fun create_dispute(
     contract: ID,
@@ -680,7 +668,6 @@ public(package) fun share_dispute(
         parties,
         schedule: dispute.schedule,
         economics: dispute.economics,
-        operation: dispute.operation,
     });
 
     transfer::share_object(dispute);
@@ -765,7 +752,6 @@ public(package) fun register_payment(
         amount,
         party,
         event_type,
-        timestamp,
     });
 }
 
@@ -789,7 +775,6 @@ public(package) fun register_refund(
         amount,
         party,
         event_type: dispute_refund(),
-        timestamp,
     });
 }
 
@@ -800,10 +785,11 @@ public(package) fun start_response_period(
     dispute.status = dispute_status_response();
     dispute.schedule.round_init_ms = clock.timestamp_ms();
 
-    event::emit(ResponsePeriodEvent {
+    event::emit(DisputeEvent {
         dispute: object::id(dispute),
-        round: dispute.round,
-        timestamp: dispute.schedule.round_init_ms,
+        event_type: nivra::constants::start_response_period(),
+        result: option::none(),
+        votes_per_option: option::none(),
     });
 }
 
@@ -811,10 +797,11 @@ public(package) fun start_draw_period(dispute: &mut Dispute, clock: &Clock) {
     dispute.status = dispute_status_draw();
     dispute.schedule.round_init_ms = clock.timestamp_ms();
 
-    event::emit(DrawPeriodEvent { 
+    event::emit(DisputeEvent { 
         dispute: object::id(dispute),
-        round: dispute.round,
-        timestamp: dispute.schedule.round_init_ms,
+        event_type: nivra::constants::start_draw_period(),
+        result: option::none(),
+        votes_per_option: option::none(),
     });
 }
 
@@ -849,7 +836,6 @@ public(package) fun add_voter(
     event::emit(NivsterSelectionEvent {
         dispute: object::id(dispute),
         nivster,
-        reselected: idx.is_some(),
         locked_amount: stake,
     });
 }
@@ -870,11 +856,11 @@ public(package) fun start_new_round(
         dispute.winner_option = option::none();
     };
 
-    event::emit(NewRoundEvent {
+    event::emit(DisputeEvent {
         dispute: object::id(dispute),
-        round: dispute.round,
-        timestamp: dispute.schedule.round_init_ms,
-        tie_round: false,
+        event_type: nivra::constants::start_new_round(),
+        result: option::none(),
+        votes_per_option: option::none(),
     });
 }
 
@@ -892,11 +878,11 @@ public(package) fun start_new_round_tie(
     dispute.result = vector[];
     dispute.winner_option = option::none();
 
-    event::emit(NewRoundEvent {
+    event::emit(DisputeEvent {
         dispute: object::id(dispute),
-        round: dispute.round,
-        timestamp: dispute.schedule.round_init_ms,
-        tie_round: true,
+        event_type: nivra::constants::start_tie_round(),
+        result: option::none(),
+        votes_per_option: option::none(),
     });
 }
 
@@ -943,42 +929,14 @@ public(package) fun voters_mut(
 
 public(package) fun cancel_dispute(
     dispute: &mut Dispute,
-    clock: &Clock,
 ) {
-    let current_time = clock.timestamp_ms();
-
-    let draw_period_end = dispute.schedule.round_init_ms +
-        dispute.schedule.draw_period_ms;
-
-    let timetable_end = dispute.schedule.round_init_ms + 
-        dispute.schedule.evidence_period_ms + 
-        dispute.schedule.voting_period_ms + 
-        dispute.schedule.appeal_period_ms;
-
-    let untallied = (current_time > timetable_end) && 
-        (dispute.status == dispute_status_active());
-
-    let unresolved_tie = (current_time > timetable_end) && 
-        (dispute.status == dispute_status_tie());
-
-    let no_nivsters_drawn = (current_time > draw_period_end) && 
-        (dispute.status == dispute_status_draw());
-
-    let mut reason = 0;
-
-    if (untallied) {
-        reason = VOTES_NOT_COUNTED;
-    } else if (unresolved_tie) {
-        reason = UNRESOLVED_TIE;
-    } else if (no_nivsters_drawn) {
-        reason = NIVSTERS_NOT_DRAWN;
-    };
-
     dispute.status = dispute_status_cancelled();
 
-    event::emit(DisputeCancelledEvent { 
+    event::emit(DisputeEvent { 
         dispute: object::id(dispute), 
-        reason,
+        event_type: nivra::constants::dispute_cancelled(),
+        result: option::none(),
+        votes_per_option: option::none(),
     });
 }
 
@@ -1007,10 +965,11 @@ public(package) fun resolve_dispute_one_sided(
         );
     });
 
-    event::emit(DisputeResolvedOneSided {
+    event::emit(DisputeEvent {
         dispute: object::id(dispute),
-        winner_party,
-        winner_option: *winner_option,
+        event_type: nivra::constants::dispute_completed_one_sided(),
+        result: option::some(*winner_option),
+        votes_per_option: option::none(),
     });
 }
 
@@ -1020,7 +979,6 @@ public(package) fun complete_dispute(
 ) {
     dispute.status = dispute_status_completed();
     let winner_option = dispute.winner_option();
-    let winner_party = dispute.winner_party();
 
     dispute.parties().do!(|party| {
         transfer::public_transfer(
@@ -1037,10 +995,11 @@ public(package) fun complete_dispute(
         );
     });
 
-    event::emit(DisputeCompleted {
+    event::emit(DisputeEvent {
         dispute: object::id(dispute),
-        winner_party: *winner_party.borrow(),
-        winner_option: *winner_option.borrow(),
+        event_type: nivra::constants::dispute_completed(),
+        result: winner_option,
+        votes_per_option: option::none(),
     });
 }
 
