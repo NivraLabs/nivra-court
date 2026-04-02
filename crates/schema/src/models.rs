@@ -263,3 +263,16 @@ pub struct Evidence {
     pub digest: String,
     pub event_digest: String,
 }
+
+#[derive(AsChangeset)]
+#[diesel(table_name = evidence, primary_key(evidence_id))]
+pub struct EvidenceModified {
+    pub evidence_id: String,
+    pub description: String,
+    pub src: Option<String>,
+    pub file_name: Option<String>,
+    pub file_type: Option<String>,
+    pub file_subtype: Option<String>,
+    pub encrypted: bool,
+    pub modified: Option<NaiveDateTime>,
+}

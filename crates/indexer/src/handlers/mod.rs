@@ -15,6 +15,9 @@ pub mod court_operation_changed_handler;
 pub mod dispute_created_handler;
 pub mod dispute_event_handler;
 pub mod dispute_payment_handler;
+pub mod evidence_created_handler;
+pub mod evidence_modified_handler;
+pub mod evidence_removed_handler;
 pub mod nivster_selection_handler;
 pub mod worker_pool_event_handler;
 

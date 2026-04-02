@@ -59,7 +59,6 @@ public struct EvidenceModifiedEvent has copy, drop {
 }
 
 public struct EvidenceRemovedEvent has copy, drop {
-    dispute: ID,
     evidence: ID,
 }
 
@@ -249,8 +248,7 @@ public fun remove_evidence(
 
     id.delete();
 
-    event::emit(EvidenceRemovedEvent { 
-        dispute: object::id(dispute), 
+    event::emit(EvidenceRemovedEvent {
         evidence: evidence_id,
     });
 }

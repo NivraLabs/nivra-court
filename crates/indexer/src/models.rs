@@ -231,4 +231,52 @@ pub mod nivra {
             const NAME: &'static str = "DisputeEvent";
         }
     }
+
+    pub mod evidence {
+        use super::*;
+
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        pub struct EvidenceCreatedEvent {
+            pub dispute: ObjectID,
+            pub evidence: ObjectID,
+            pub party: Address,
+            pub description: String,
+            pub src: Option<String>,
+            pub file_name: Option<String>,
+            pub file_type: Option<String>,
+            pub file_subtype: Option<String>,
+            pub encrypted: bool,
+        }
+
+        impl MoveStruct for EvidenceCreatedEvent {
+            const MODULE: &'static str = "evidence";
+            const NAME: &'static str = "EvidenceCreatedEvent";
+        }
+
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        pub struct EvidenceModifiedEvent {
+            pub evidence: ObjectID,
+            pub description: String,
+            pub src: Option<String>,
+            pub file_name: Option<String>,
+            pub file_type: Option<String>,
+            pub file_subtype: Option<String>,
+            pub encrypted: bool,
+        }
+
+        impl MoveStruct for EvidenceModifiedEvent {
+            const MODULE: &'static str = "evidence";
+            const NAME: &'static str = "EvidenceModifiedEvent";
+        }
+
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        pub struct EvidenceRemovedEvent {
+            pub evidence: ObjectID,
+        }
+
+        impl MoveStruct for EvidenceRemovedEvent {
+            const MODULE: &'static str = "evidence";
+            const NAME: &'static str = "EvidenceRemovedEvent";
+        }
+    }
 }
