@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 
 use anyhow::Context;
 use clap::Parser;
-use nivra_indexer::{NivraEnv, handlers::{admin_vote_finalized_handler::AdminVoteFinalizedHandler, admin_vote_handler::AdminVoteHandler, balance_event_handler::BalanceEventHandler, court_created_handler::CourtCreatedHandler, court_metadata_changed_handler::CourtMetadataChangedHandler, court_operation_changed_handler::CourtOperationChangedHandler, court_timetable_changed_handler::CourtTimetableChangedHandler, dispute_created_handler::DisputeCreatedHandler, dispute_event_handler::DisputeEventHandler, dispute_payment_handler::DisputePaymentHandler, evidence_created_handler::EvidenceCreatedHandler, evidence_modified_handler::EvidenceModifiedHandler, evidence_removed_handler::EvidenceRemovedHandler, nivster_selection_handler::NivsterSelectionHandler, worker_pool_event_handler::WorkerPoolEventHandler}};
+use nivra_indexer::{NivraEnv, handlers::{admin_vote_finalized_handler::AdminVoteFinalizedHandler, admin_vote_handler::AdminVoteHandler, balance_event_handler::BalanceEventHandler, court_created_handler::CourtCreatedHandler, court_economics_changed_handler::CourtEconomicsChangedHandler, court_metadata_changed_handler::CourtMetadataChangedHandler, court_operation_changed_handler::CourtOperationChangedHandler, court_timetable_changed_handler::CourtTimetableChangedHandler, dispute_created_handler::DisputeCreatedHandler, dispute_event_handler::DisputeEventHandler, dispute_payment_handler::DisputePaymentHandler, evidence_created_handler::EvidenceCreatedHandler, evidence_modified_handler::EvidenceModifiedHandler, evidence_removed_handler::EvidenceRemovedHandler, nivster_selection_handler::NivsterSelectionHandler, worker_pool_event_handler::WorkerPoolEventHandler}};
 use nivra_schema::MIGRATIONS;
 use prometheus::Registry;
 use sui_indexer_alt_framework::{Indexer, IndexerArgs, ingestion::{ClientArgs, IngestionConfig, ingestion_client::IngestionClientArgs, streaming_client::StreamingClientArgs}};
@@ -106,7 +106,7 @@ async fn main() -> Result<(), anyhow::Error> {
                     .sequential_pipeline(CourtTimetableChangedHandler::new(env), Default::default())
                     .await?;
                 indexer
-                    .sequential_pipeline(CourtTimetableChangedHandler::new(env), Default::default())
+                    .sequential_pipeline(CourtEconomicsChangedHandler::new(env), Default::default())
                     .await?;
                 indexer
                     .sequential_pipeline(CourtOperationChangedHandler::new(env), Default::default())
