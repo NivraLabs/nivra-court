@@ -1,9 +1,10 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use nivra_schema::constants::{DISPUTE_OPENING_FEE, START_RESPONSE_PERIOD};
-use nivra_schema::models::{Dispute, NewDisputeEvent, NewDisputePayment};
-use nivra_schema::schema::{dispute, dispute_event, dispute_payment};
+use nivra_schema::constants::{DISPUTE_OPENED, DISPUTE_OPENING_FEE, DISPUTE_STATUS_RESPONSE, START_RESPONSE_PERIOD};
+use nivra_schema::models::{Dispute, DisputeParty, NewDisputeEvent, NewDisputePayment, NewPartyNotification};
+use nivra_schema::schema::{dispute, dispute_event, dispute_party, dispute_payment, party_notification};
 use sui_indexer_alt_framework::pipeline::Processor;
 use sui_indexer_alt_framework::pipeline::sequential::Handler;
 use sui_indexer_alt_framework::types::full_checkpoint_content::Checkpoint;
@@ -12,7 +13,7 @@ use sui_types::transaction::TransactionDataAPI;
 use diesel_async::RunQueryDsl;
 
 use crate::NivraEnv;
-use crate::handlers::{has_nivra_events, try_extract_move_call_package};
+use crate::handlers::has_nivra_events;
 use crate::models::nivra::dispute::DisputeCreatedEvent;
 use crate::traits::MoveStruct;
 
@@ -43,12 +44,9 @@ impl Processor for DisputeCreatedHandler {
                 continue;
             };
 
-            let package = try_extract_move_call_package(tx).unwrap_or_default();
             let checkpoint_timestamp_ms = checkpoint.summary.timestamp_ms as i64;
-            let checkpoint_seq = checkpoint.summary.sequence_number as i64;
-            let digest = tx.transaction.digest();
 
-            for (index, ev) in events.data.iter().enumerate() {
+            for ev in events.data.iter() {
                 if !DisputeCreatedEvent::matches_event_type(&ev.type_, self.env) {
                     continue;
                 }
@@ -58,6 +56,12 @@ impl Processor for DisputeCreatedHandler {
                     dispute_id: event.dispute.to_string(), 
                     contract_id: event.contract.to_string(), 
                     court_id: event.court.to_string(),
+                    dispute_status: DISPUTE_STATUS_RESPONSE,
+                    vote_result: None,
+                    winner_option: None,
+                    winner_party: None,
+                    current_round: 0,
+                    appeals_used: 0,
                     max_appeals: event.max_appeals as i16, 
                     initiator: event.initiator.to_string(), 
                     options: event.options, 
@@ -76,11 +80,7 @@ impl Processor for DisputeCreatedHandler {
                     treasury_share_nvr: event.economics.treasury_share_nvr as i16, 
                     empty_vote_penalty: event.economics.empty_vote_penalty as i16, 
                     sender: tx.transaction.sender().to_string(), 
-                    checkpoint: checkpoint_seq, 
-                    checkpoint_timestamp_ms, 
-                    package: package.clone(), 
-                    digest: digest.to_string(), 
-                    event_digest: format!("{digest}{index}"),
+                    checkpoint_timestamp_ms,
                 };
 
                 results.push(data);
@@ -103,6 +103,8 @@ impl Handler for DisputeCreatedHandler {
     async fn commit<'a>(&self, batch: &Self::Batch, conn: &mut Connection<'a>) -> anyhow::Result<usize> {
         let mut dispute_payments: Vec<NewDisputePayment> = Vec::new();
         let mut dispute_events: Vec<NewDisputeEvent> = Vec::new();
+        let mut dispute_parties: Vec<DisputeParty> = Vec::new();
+        let mut party_notifications: Vec<NewPartyNotification> = Vec::new();
 
         for dispute in batch.iter() {
             dispute_payments.push(NewDisputePayment { 
@@ -111,11 +113,7 @@ impl Handler for DisputeCreatedHandler {
                 amount: dispute.dispute_fee, 
                 payment_type: DISPUTE_OPENING_FEE, 
                 sender: dispute.sender.clone(), 
-                checkpoint: dispute.checkpoint, 
-                checkpoint_timestamp_ms: dispute.checkpoint_timestamp_ms, 
-                package: dispute.package.clone(), 
-                digest: dispute.digest.clone(), 
-                event_digest: dispute.event_digest.clone(), 
+                checkpoint_timestamp_ms: dispute.checkpoint_timestamp_ms,
             });
 
             dispute_events.push(NewDisputeEvent { 
@@ -124,11 +122,37 @@ impl Handler for DisputeCreatedHandler {
                 result: Option::None,
                 votes_per_option: Option::None,
                 sender: dispute.sender.clone(), 
-                checkpoint: dispute.checkpoint, 
-                checkpoint_timestamp_ms: dispute.checkpoint_timestamp_ms, 
-                package: dispute.package.clone(), 
-                digest: dispute.digest.clone(), 
-                event_digest: dispute.event_digest.clone(), 
+                checkpoint_timestamp_ms: dispute.checkpoint_timestamp_ms,
+            });
+
+            let parties: Vec<DisputeParty> = dispute.options_party_mapping.clone()
+                .into_iter()
+                .collect::<HashSet<String>>()
+                .into_iter()
+                .map(|unique_addr| DisputeParty { 
+                    dispute_id: dispute.dispute_id.clone(), 
+                    party: unique_addr, 
+                })
+                .collect();
+
+            let party_b = parties.iter()
+                .find(|party| party.party != dispute.initiator)
+                .map(|party| &party.party)
+                .unwrap()
+                .to_owned();
+
+            for party in parties.into_iter() {
+                dispute_parties.push(party);
+            }
+
+            party_notifications.push(NewPartyNotification { 
+                party: party_b, 
+                dispute: Some(dispute.dispute_id.clone()), 
+                notification_type: DISPUTE_OPENED, 
+                custom_msg: Some(dispute.dispute_fee.to_string()), 
+                valid_timestamp_ms: dispute.round_init_ms as i64, 
+                expires_timestamp_ms: dispute.round_init_ms as i64 + dispute.response_period_ms as i64, 
+                checked: false,
             });
         }
 
@@ -146,6 +170,18 @@ impl Handler for DisputeCreatedHandler {
 
         let _ = diesel::insert_into(dispute_event::table)
             .values(dispute_events)
+            .on_conflict_do_nothing()
+            .execute(conn)
+            .await?;
+
+        let _ = diesel::insert_into(dispute_party::table)
+            .values(dispute_parties)
+            .on_conflict_do_nothing()
+            .execute(conn)
+            .await?;
+
+        let _ = diesel::insert_into(party_notification::table)
+            .values(party_notifications)
             .on_conflict_do_nothing()
             .execute(conn)
             .await?;

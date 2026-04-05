@@ -14,12 +14,7 @@ CREATE TABLE IF NOT EXISTS evidence
     censored                    BOOLEAN      NOT NULL,
     modified                    TIMESTAMP,
     sender                      TEXT         NOT NULL,
-    checkpoint                  BIGINT       NOT NULL,
-    timestamp                   TIMESTAMP    DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    checkpoint_timestamp_ms     BIGINT       NOT NULL,
-    package                     TEXT         NOT NULL,
-    digest                      TEXT         NOT NULL,
-    event_digest                TEXT         NOT NULL
+    checkpoint_timestamp_ms     BIGINT       NOT NULL
 );
 
 CREATE INDEX idx_evidence_dispute ON evidence

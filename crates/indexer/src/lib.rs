@@ -4,6 +4,7 @@ use move_core_types::account_address::AccountAddress;
 use url::Url;
 
 pub(crate) mod models;
+pub(crate) mod notifications;
 pub mod traits;
 pub mod handlers;
 

@@ -5,6 +5,12 @@ CREATE TABLE IF NOT EXISTS dispute
     dispute_id                  TEXT         PRIMARY KEY,
     contract_id                 TEXT         NOT NULL,
     court_id                    TEXT         NOT NULL REFERENCES court(court_id),
+    dispute_status              SMALLINT     NOT NULL,
+    vote_result                 INTEGER[],
+    winner_option               TEXT,
+    winner_party                TEXT,
+    current_round               SMALLINT     NOT NULL,
+    appeals_used                SMALLINT     NOT NULL,
     max_appeals                 SMALLINT     NOT NULL,
     initiator                   TEXT         NOT NULL,
     options                     TEXT[]       NOT NULL,
@@ -23,12 +29,7 @@ CREATE TABLE IF NOT EXISTS dispute
     treasury_share_nvr          SMALLINT     NOT NULL,
     empty_vote_penalty          SMALLINT     NOT NULL,
     sender                      TEXT         NOT NULL,
-    checkpoint                  BIGINT       NOT NULL,
-    timestamp                   TIMESTAMP    DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    checkpoint_timestamp_ms     BIGINT       NOT NULL,
-    package                     TEXT         NOT NULL,
-    digest                      TEXT         NOT NULL,
-    event_digest                TEXT         NOT NULL
+    checkpoint_timestamp_ms     BIGINT       NOT NULL
 );
 
 CREATE EXTENSION IF NOT EXISTS btree_gin;
@@ -44,15 +45,21 @@ CREATE TABLE IF NOT EXISTS dispute_payment
     amount                      BIGINT       NOT NULL,
     payment_type                SMALLINT     NOT NULL,
     sender                      TEXT         NOT NULL,
-    checkpoint                  BIGINT       NOT NULL,
-    timestamp                   TIMESTAMP    DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    checkpoint_timestamp_ms     BIGINT       NOT NULL,
-    package                     TEXT         NOT NULL,
-    digest                      TEXT         NOT NULL,
-    event_digest                TEXT         NOT NULL
+    checkpoint_timestamp_ms     BIGINT       NOT NULL
 );
 
-CREATE INDEX idx_dispute_payment_party ON dispute_payment(party);
+CREATE INDEX idx_dispute_payment_party ON dispute_payment(dispute_id, checkpoint_timestamp_ms)
+INCLUDE (party, payment_type, amount);
+
+CREATE TABLE IF NOT EXISTS dispute_party
+(
+    dispute_id                  TEXT         NOT NULL REFERENCES dispute(dispute_id),
+    party                       TEXT         NOT NULL,
+    PRIMARY KEY (dispute_id, party)
+);
+
+CREATE INDEX idx_dispute_party ON dispute_party(party) INCLUDE (dispute_id);
+CREATE INDEX idx_dispute_party_id ON dispute_party(dispute_id) INCLUDE (party);
 
 CREATE TABLE IF NOT EXISTS dispute_nivster
 (
@@ -60,10 +67,13 @@ CREATE TABLE IF NOT EXISTS dispute_nivster
     nivster                     TEXT         NOT NULL,
     votes                       SMALLINT     NOT NULL,
     stake                       BIGINT       NOT NULL,
+    sender                      TEXT         NOT NULL,
+    checkpoint_timestamp_ms     BIGINT       NOT NULL,
     PRIMARY KEY (dispute_id, nivster)
 );
 
-CREATE INDEX idx_dispute_nivster ON dispute_nivster(nivster);
+CREATE INDEX idx_dispute_nivster ON dispute_nivster(nivster)
+INCLUDE (dispute_id, votes, stake);
 
 CREATE TABLE IF NOT EXISTS dispute_event
 (
@@ -73,12 +83,7 @@ CREATE TABLE IF NOT EXISTS dispute_event
     result                      TEXT,
     votes_per_option            INTEGER[],
     sender                      TEXT         NOT NULL,
-    checkpoint                  BIGINT       NOT NULL,
-    timestamp                   TIMESTAMP    DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    checkpoint_timestamp_ms     BIGINT       NOT NULL,
-    package                     TEXT         NOT NULL,
-    digest                      TEXT         NOT NULL,
-    event_digest                TEXT         NOT NULL
+    checkpoint_timestamp_ms     BIGINT       NOT NULL
 );
 
 CREATE INDEX idx_dispute_events_dispute_id ON dispute_event(dispute_id);

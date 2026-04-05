@@ -149,6 +149,7 @@ public struct DisputeEvent has copy, drop {
     event_type: u64,
     result: Option<String>,
     votes_per_option: Option<vector<u64>>,
+    // TODO: timestamp!
 }
 
 // === Method Aliases ===

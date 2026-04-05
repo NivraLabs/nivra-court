@@ -3,7 +3,7 @@ use diesel::{AsChangeset, Identifiable, Insertable, Queryable, Selectable};
 use serde::Deserialize;
 use sui_field_count::FieldCount;
 
-use crate::schema::{admin_vote, balance_event, court, dispute, dispute_event, dispute_nivster, dispute_payment, evidence, worker_pool};
+use crate::schema::{admin_vote, balance_event, court, dispute, dispute_event, dispute_nivster, dispute_party, dispute_payment, evidence, nivster_notification, party_notification, worker_pool};
 
 #[derive(Queryable, Selectable, Insertable, Identifiable, FieldCount, Debug)]
 #[diesel(table_name = admin_vote, primary_key(vote_id))]
@@ -12,11 +12,7 @@ pub struct AdminVote {
     pub vote_type: i16,
     pub vote_enforced: bool,
     pub sender: String,
-    pub checkpoint: i64,
     pub checkpoint_timestamp_ms: i64,
-    pub package: String,
-    pub digest: String,
-    pub event_digest: String,
 }
 
 #[derive(Queryable, Selectable, Insertable, Identifiable, FieldCount, Debug)]
@@ -43,11 +39,7 @@ pub struct Court {
     pub empty_vote_penalty: i16,
     pub status: i16,
     pub sender: String,
-    pub checkpoint: i64,
     pub checkpoint_timestamp_ms: i64,
-    pub package: String,
-    pub digest: String,
-    pub event_digest: String,
 }
 
 #[derive(AsChangeset)]
@@ -99,6 +91,12 @@ pub struct Dispute {
     pub dispute_id: String,
     pub contract_id: String,
     pub court_id: String,
+    pub dispute_status: i16,
+    pub vote_result: Option<Vec<i32>>,
+    pub winner_option: Option<String>,
+    pub winner_party: Option<String>,
+    pub current_round: i16,
+    pub appeals_used: i16,
     pub max_appeals: i16,
     pub initiator: String,
     pub options: Vec<String>,
@@ -117,11 +115,7 @@ pub struct Dispute {
     pub treasury_share_nvr: i16,
     pub empty_vote_penalty: i16,
     pub sender: String,
-    pub checkpoint: i64,
     pub checkpoint_timestamp_ms: i64,
-    pub package: String,
-    pub digest: String,
-    pub event_digest: String,
 }
 
 #[derive(Queryable, Selectable, Identifiable, Debug)]
@@ -133,11 +127,7 @@ pub struct DisputeEvent {
     pub result: Option<String>,
     pub votes_per_option: Option<Vec<i32>>,
     pub sender: String,
-    pub checkpoint: i64,
     pub checkpoint_timestamp_ms: i64,
-    pub package: String,
-    pub digest: String,
-    pub event_digest: String,
 }
 
 #[derive(Deserialize, Insertable)]
@@ -148,11 +138,15 @@ pub struct NewDisputeEvent {
     pub result: Option<String>,
     pub votes_per_option: Option<Vec<i32>>,
     pub sender: String,
-    pub checkpoint: i64,
     pub checkpoint_timestamp_ms: i64,
-    pub package: String,
-    pub digest: String,
-    pub event_digest: String,
+}
+
+#[derive(Queryable, Selectable, Insertable, Identifiable, Debug)]
+#[diesel(table_name = dispute_party)]
+#[diesel(primary_key(dispute_id, party))]
+pub struct DisputeParty {
+    pub dispute_id: String,
+    pub party: String,
 }
 
 #[derive(Queryable, Selectable, Insertable, Identifiable, Debug)]
@@ -163,6 +157,8 @@ pub struct DisputeNivster {
     pub nivster: String,
     pub votes: i16,
     pub stake: i64,
+    pub sender: String,
+    pub checkpoint_timestamp_ms: i64,
 }
 
 #[derive(Queryable, Selectable, Identifiable, Debug)]
@@ -174,11 +170,7 @@ pub struct DisputePayment {
     pub amount: i64,
     pub payment_type: i16,
     pub sender: String,
-    pub checkpoint: i64,
     pub checkpoint_timestamp_ms: i64,
-    pub package: String,
-    pub digest: String,
-    pub event_digest: String,
 }
 
 #[derive(Deserialize, Insertable)]
@@ -189,11 +181,7 @@ pub struct NewDisputePayment {
     pub amount: i64,
     pub payment_type: i16,
     pub sender: String,
-    pub checkpoint: i64,
     pub checkpoint_timestamp_ms: i64,
-    pub package: String,
-    pub digest: String,
-    pub event_digest: String,
 }
 
 #[derive(Queryable, Selectable, Identifiable, Debug)]
@@ -208,11 +196,7 @@ pub struct BalanceEvent {
     pub lock_nvr: i64,
     pub dispute_id: Option<String>,
     pub sender: String,
-    pub checkpoint: i64,
     pub checkpoint_timestamp_ms: i64,
-    pub package: String,
-    pub digest: String,
-    pub event_digest: String,
 }
 
 #[derive(Deserialize, Insertable)]
@@ -226,11 +210,7 @@ pub struct NewBalanceEvent {
     pub lock_nvr: i64,
     pub dispute_id: Option<String>,
     pub sender: String,
-    pub checkpoint: i64,
     pub checkpoint_timestamp_ms: i64,
-    pub package: String,
-    pub digest: String,
-    pub event_digest: String,
 }
 
 #[derive(Queryable, Selectable, Insertable, Identifiable, Debug)]
@@ -257,11 +237,7 @@ pub struct Evidence {
     pub censored: bool,
     pub modified: Option<NaiveDateTime>,
     pub sender: String,
-    pub checkpoint: i64,
     pub checkpoint_timestamp_ms: i64,
-    pub package: String,
-    pub digest: String,
-    pub event_digest: String,
 }
 
 #[derive(AsChangeset)]
@@ -275,4 +251,52 @@ pub struct EvidenceModified {
     pub file_subtype: Option<String>,
     pub encrypted: bool,
     pub modified: Option<NaiveDateTime>,
+}
+
+#[derive(Deserialize, Insertable)]
+#[diesel(table_name = nivster_notification)]
+pub struct NewNivsterNotificationRef<'a> {
+    pub nivster: &'a str,
+    pub dispute: Option<&'a str>,
+    pub notification_type: i16,
+    pub custom_msg: Option<&'a str>,
+    pub valid_timestamp_ms: i64,
+    pub expires_timestamp_ms: i64,
+    pub checked: bool,
+}
+
+#[derive(Deserialize, Insertable)]
+#[diesel(table_name = nivster_notification)]
+pub struct NewNivsterNotification {
+    pub nivster: String,
+    pub dispute: Option<String>,
+    pub notification_type: i16,
+    pub custom_msg: Option<String>,
+    pub valid_timestamp_ms: i64,
+    pub expires_timestamp_ms: i64,
+    pub checked: bool,
+}
+
+#[derive(Deserialize, Insertable)]
+#[diesel(table_name = party_notification)]
+pub struct NewPartyNotification {
+    pub party: String,
+    pub dispute: Option<String>,
+    pub notification_type: i16,
+    pub custom_msg: Option<String>,
+    pub valid_timestamp_ms: i64,
+    pub expires_timestamp_ms: i64,
+    pub checked: bool,
+}
+
+#[derive(Deserialize, Insertable)]
+#[diesel(table_name = party_notification)]
+pub struct NewPartyNotificationRef<'a> {
+    pub party: &'a str,
+    pub dispute: Option<&'a str>,
+    pub notification_type: i16,
+    pub custom_msg: Option<&'a str>,
+    pub valid_timestamp_ms: i64,
+    pub expires_timestamp_ms: i64,
+    pub checked: bool,
 }

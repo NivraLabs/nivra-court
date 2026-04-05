@@ -1,5 +1,4 @@
 use sui_indexer_alt_framework::types::full_checkpoint_content::ExecutedTransaction;
-use sui_types::transaction::{Command, TransactionDataAPI};
 
 use crate::NivraEnv;
 
@@ -41,14 +40,4 @@ pub(crate) fn has_nivra_events(
     }
 
     false
-}
-
-pub(crate) fn try_extract_move_call_package(tx: &ExecutedTransaction) -> Option<String> {
-    let txn_kind = tx.transaction.kind();
-    let first_command = txn_kind.iter_commands().next()?;
-    if let Command::MoveCall(move_call) = first_command {
-        Some(move_call.package.to_string())
-    } else {
-        None
-    }
 }

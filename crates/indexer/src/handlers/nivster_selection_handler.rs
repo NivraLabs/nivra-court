@@ -10,10 +10,12 @@ use sui_indexer_alt_framework::types::full_checkpoint_content::Checkpoint;
 use sui_indexer_alt_framework::postgres::{Connection, Db};
 use diesel_async::RunQueryDsl;
 use diesel::upsert::excluded;
+use sui_types::transaction::TransactionDataAPI;
 
 use crate::NivraEnv;
 use crate::handlers::has_nivra_events;
 use crate::models::nivra::dispute::NivsterSelectionEvent;
+use crate::notifications::notify_nivsters_dispute_selection;
 use crate::traits::MoveStruct;
 
 
@@ -48,12 +50,16 @@ impl Processor for NivsterSelectionHandler {
                     continue;
                 }
 
+                let checkpoint_timestamp_ms = checkpoint.summary.timestamp_ms as i64;
+
                 let event: NivsterSelectionEvent = bcs::from_bytes(&ev.contents)?;
                 let data = DisputeNivster { 
                     dispute_id: event.dispute.to_string(), 
                     nivster: event.nivster.to_string(), 
                     votes: 1, 
                     stake: event.locked_amount as i64, 
+                    sender: tx.transaction.sender().to_string(),
+                    checkpoint_timestamp_ms,
                 };
 
                 results.push(data);
@@ -91,6 +97,8 @@ impl Handler for NivsterSelectionHandler {
             ))
             .execute(conn)
             .await?;
+
+        notify_nivsters_dispute_selection(batch, conn).await?;
 
         Ok(inserted)
     }

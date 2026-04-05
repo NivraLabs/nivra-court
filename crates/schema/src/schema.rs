@@ -6,12 +6,7 @@ diesel::table! {
         vote_type -> Int2,
         vote_enforced -> Bool,
         sender -> Text,
-        checkpoint -> Int8,
-        timestamp -> Timestamp,
         checkpoint_timestamp_ms -> Int8,
-        package -> Text,
-        digest -> Text,
-        event_digest -> Text,
     }
 }
 
@@ -26,12 +21,7 @@ diesel::table! {
         lock_nvr -> Int8,
         dispute_id -> Nullable<Text>,
         sender -> Text,
-        checkpoint -> Int8,
-        timestamp -> Timestamp,
         checkpoint_timestamp_ms -> Int8,
-        package -> Text,
-        digest -> Text,
-        event_digest -> Text,
     }
 }
 
@@ -59,12 +49,7 @@ diesel::table! {
         empty_vote_penalty -> Int2,
         status -> Int2,
         sender -> Text,
-        checkpoint -> Int8,
-        timestamp -> Timestamp,
         checkpoint_timestamp_ms -> Int8,
-        package -> Text,
-        digest -> Text,
-        event_digest -> Text,
     }
 }
 
@@ -73,6 +58,12 @@ diesel::table! {
         dispute_id -> Text,
         contract_id -> Text,
         court_id -> Text,
+        dispute_status -> Int2,
+        vote_result -> Nullable<Array<Nullable<Int4>>>,
+        winner_option -> Nullable<Text>,
+        winner_party -> Nullable<Text>,
+        current_round -> Int2,
+        appeals_used -> Int2,
         max_appeals -> Int2,
         initiator -> Text,
         options -> Array<Nullable<Text>>,
@@ -91,12 +82,7 @@ diesel::table! {
         treasury_share_nvr -> Int2,
         empty_vote_penalty -> Int2,
         sender -> Text,
-        checkpoint -> Int8,
-        timestamp -> Timestamp,
         checkpoint_timestamp_ms -> Int8,
-        package -> Text,
-        digest -> Text,
-        event_digest -> Text,
     }
 }
 
@@ -108,12 +94,7 @@ diesel::table! {
         result -> Nullable<Text>,
         votes_per_option -> Nullable<Array<Nullable<Int4>>>,
         sender -> Text,
-        checkpoint -> Int8,
-        timestamp -> Timestamp,
         checkpoint_timestamp_ms -> Int8,
-        package -> Text,
-        digest -> Text,
-        event_digest -> Text,
     }
 }
 
@@ -123,6 +104,15 @@ diesel::table! {
         nivster -> Text,
         votes -> Int2,
         stake -> Int8,
+        sender -> Text,
+        checkpoint_timestamp_ms -> Int8,
+    }
+}
+
+diesel::table! {
+    dispute_party (dispute_id, party) {
+        dispute_id -> Text,
+        party -> Text,
     }
 }
 
@@ -134,12 +124,7 @@ diesel::table! {
         amount -> Int8,
         payment_type -> Int2,
         sender -> Text,
-        checkpoint -> Int8,
-        timestamp -> Timestamp,
         checkpoint_timestamp_ms -> Int8,
-        package -> Text,
-        digest -> Text,
-        event_digest -> Text,
     }
 }
 
@@ -157,12 +142,33 @@ diesel::table! {
         censored -> Bool,
         modified -> Nullable<Timestamp>,
         sender -> Text,
-        checkpoint -> Int8,
-        timestamp -> Timestamp,
         checkpoint_timestamp_ms -> Int8,
-        package -> Text,
-        digest -> Text,
-        event_digest -> Text,
+    }
+}
+
+diesel::table! {
+    nivster_notification (id) {
+        id -> Int8,
+        nivster -> Text,
+        dispute -> Nullable<Text>,
+        notification_type -> Int2,
+        custom_msg -> Nullable<Text>,
+        valid_timestamp_ms -> Int8,
+        expires_timestamp_ms -> Int8,
+        checked -> Bool,
+    }
+}
+
+diesel::table! {
+    party_notification (id) {
+        id -> Int8,
+        party -> Text,
+        dispute -> Nullable<Text>,
+        notification_type -> Int2,
+        custom_msg -> Nullable<Text>,
+        valid_timestamp_ms -> Int8,
+        expires_timestamp_ms -> Int8,
+        checked -> Bool,
     }
 }
 
@@ -193,8 +199,11 @@ diesel::joinable!(balance_event -> dispute (dispute_id));
 diesel::joinable!(dispute -> court (court_id));
 diesel::joinable!(dispute_event -> dispute (dispute_id));
 diesel::joinable!(dispute_nivster -> dispute (dispute_id));
+diesel::joinable!(dispute_party -> dispute (dispute_id));
 diesel::joinable!(dispute_payment -> dispute (dispute_id));
 diesel::joinable!(evidence -> dispute (dispute_id));
+diesel::joinable!(nivster_notification -> dispute (dispute));
+diesel::joinable!(party_notification -> dispute (dispute));
 diesel::joinable!(worker_pool -> court (court));
 
 diesel::allow_tables_to_appear_in_same_query!(
@@ -204,8 +213,11 @@ diesel::allow_tables_to_appear_in_same_query!(
     dispute,
     dispute_event,
     dispute_nivster,
+    dispute_party,
     dispute_payment,
     evidence,
+    nivster_notification,
+    party_notification,
     watermarks,
     worker_pool,
 );

@@ -11,7 +11,7 @@ use sui_types::transaction::TransactionDataAPI;
 use diesel_async::RunQueryDsl;
 
 use crate::NivraEnv;
-use crate::handlers::{has_nivra_events, try_extract_move_call_package};
+use crate::handlers::has_nivra_events;
 use crate::models::nivra::dispute::DisputePaymentEvent;
 use crate::traits::MoveStruct;
 
@@ -42,12 +42,9 @@ impl Processor for DisputePaymentHandler {
                 continue;
             };
 
-            let package = try_extract_move_call_package(tx).unwrap_or_default();
             let checkpoint_timestamp_ms = checkpoint.summary.timestamp_ms as i64;
-            let checkpoint_seq = checkpoint.summary.sequence_number as i64;
-            let digest = tx.transaction.digest();
 
-            for (index, ev) in events.data.iter().enumerate() {
+            for ev in events.data.iter() {
                 if !DisputePaymentEvent::matches_event_type(&ev.type_, self.env) {
                     continue;
                 }
@@ -58,12 +55,8 @@ impl Processor for DisputePaymentHandler {
                     party: event.party.to_string(), 
                     amount: event.amount as i64, 
                     payment_type: event.event_type as i16, 
-                    sender: tx.transaction.sender().to_string(), 
-                    checkpoint: checkpoint_seq, 
-                    checkpoint_timestamp_ms, 
-                    package: package.clone(), 
-                    digest: digest.to_string(), 
-                    event_digest: format!("{digest}{index}"), 
+                    sender: tx.transaction.sender().to_string(),
+                    checkpoint_timestamp_ms,
                 };
 
                 results.push(data);

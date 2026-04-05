@@ -11,12 +11,7 @@ CREATE TABLE IF NOT EXISTS balance_event
     lock_nvr                    BIGINT       NOT NULL,
     dispute_id                  TEXT         REFERENCES dispute(dispute_id),
     sender                      TEXT         NOT NULL,
-    checkpoint                  BIGINT       NOT NULL,
-    timestamp                   TIMESTAMP    DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    checkpoint_timestamp_ms     BIGINT       NOT NULL,
-    package                     TEXT         NOT NULL,
-    digest                      TEXT         NOT NULL,
-    event_digest                TEXT         NOT NULL
+    checkpoint_timestamp_ms     BIGINT       NOT NULL
 );
 
 CREATE INDEX idx_balance_court ON balance_event
