@@ -16,7 +16,7 @@ const MAINNET_PACKAGES: &[&str] = &[
 ];
 
 const TESTNET_PACKAGES: &[&str] = &[
-    "0x8f019fff9d30b2737ec472940fa6831d7b414dd45ff8c4f16da7852358a96ab1",
+    "0x3df5ba5787ae8195bdf03ec909398a0bd346c5f2bcbd7477c0416d75ef79f83d",
 ];
 
 pub const NIVRA_MODULES: &[&str] = &[
