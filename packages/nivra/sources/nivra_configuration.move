@@ -70,7 +70,11 @@ const SHA512: u64 = 2;
 /// by the Nivra SDK when initiating disputes.
 /// 
 /// Fields:
-///
+/// 
+/// - `contract_id`
+/// 
+///    Address of the integrating contract.
+/// ---
 /// - `court`
 /// 
 ///    Address of the Nivra court contract that will adjudicate disputes.
@@ -162,7 +166,7 @@ public fun create(
     assert!(party_size >= min_party_size(), EInvalidPartySize);
     assert!(party_size <= max_party_size(), EInvalidPartySize);
 
-    NivraConfiguration { 
+    NivraConfiguration {
         court, 
         options,
         max_appeals,
@@ -178,13 +182,15 @@ public fun create_unvalidated(
     court: address,
     options: VecMap<String, address>,
     max_appeals: u8,
+    init_file_hashes: vector<vector<u8>>,
+    hashing_algo: u64,
 ): NivraConfiguration {
-    NivraConfiguration { 
+    NivraConfiguration {
         court, 
         options,
         max_appeals,
-        file_hashes: vector[],
-        hashing_algorithm: SHA256,
+        file_hashes: init_file_hashes,
+        hashing_algorithm: hashing_algo,
     }
 }
 
@@ -240,6 +246,57 @@ public fun add_file_hash_mut(
     hash: vector<u8>,
 ) {
     config.file_hashes.push_back(hash);
+}
+
+/// Removes file hash from the configuration if the hash exists.
+/// 
+/// Does not preserve ordering.
+public fun remove_file_hash(
+    mut config: NivraConfiguration,
+    hash: vector<u8>,
+): NivraConfiguration {
+    let idx = config.file_hashes.find_index!(|ex_hash| ex_hash == hash);
+
+    if (idx.is_some()) {
+        config.file_hashes.swap_remove(idx.destroy_some());
+    };
+
+    config
+}
+
+/// Removes file hash from the configuration if the hash exists.
+/// 
+/// Does not preserve ordering.
+public fun remove_file_hash_mut(
+    config: &mut NivraConfiguration,
+    hash: vector<u8>,
+) {
+    let idx = config.file_hashes.find_index!(|ex_hash| ex_hash == hash);
+    
+    if (idx.is_some()) {
+        config.file_hashes.swap_remove(idx.destroy_some());
+    };
+}
+
+/// Removes file hash by index or aborts if idx doesn't exists.
+/// 
+/// Preserves ordering.
+public fun remove_file_hash_idx(
+    mut config: NivraConfiguration,
+    idx: u64,
+): NivraConfiguration {
+    config.file_hashes.remove(idx);
+    config
+}
+
+/// Removes file hash by index or aborts if idx doesn't exists.
+/// 
+/// Preserves ordering.
+public fun remove_file_hash_idx_mut(
+    config: &mut NivraConfiguration,
+    idx: u64,
+) {
+    config.file_hashes.remove(idx);
 }
 
 // === View Functions ===

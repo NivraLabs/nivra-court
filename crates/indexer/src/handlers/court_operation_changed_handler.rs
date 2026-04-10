@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use chrono::Utc;
 use nivra_schema::models::CourtOperationChangeset;
 use nivra_schema::schema::court;
 use sui_indexer_alt_framework::pipeline::Processor;
@@ -51,6 +52,7 @@ impl Processor for CourtOperationChangedHandler {
                 let data = CourtOperationChangeset { 
                     court_id: event.court.to_string(), 
                     status: event.status as i16,
+                    modified: Utc::now().naive_utc(),
                 };
 
                 results.push(data);

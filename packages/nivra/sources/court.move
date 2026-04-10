@@ -174,6 +174,7 @@ public struct BalanceEvent has copy, drop {
 public struct WorkerPoolEvent has copy, drop {
     court: ID,
     nivster: address,
+    entry: bool,
 }
 
 public struct CourtCreatedEvent has copy, drop {
@@ -258,6 +259,7 @@ public fun stake(
         event::emit(WorkerPoolEvent {
             court: object::id(court),
             nivster: ctx.sender(),
+            entry: true,
         });
     };
 
@@ -300,6 +302,12 @@ public fun withdraw(
             court.worker_pool.sub_stake(pos, amount_nvr);
         } else {
             court.remove_from_worker_pool(ctx.sender(), stake_before_withdraw);
+
+            event::emit(WorkerPoolEvent { 
+                court: object::id(court), 
+                nivster: ctx.sender(),
+                entry: false,
+            });
         };
     };
 
@@ -337,6 +345,7 @@ public fun join_worker_pool(
     event::emit(WorkerPoolEvent {
         court: object::id(court),
         nivster: ctx.sender(),
+        entry: true,
     });
 }
 
@@ -356,6 +365,7 @@ public fun leave_worker_pool(
     event::emit(WorkerPoolEvent {
         court: object::id(court),
         nivster: ctx.sender(),
+        entry: false,
     });
 }
 
@@ -570,7 +580,7 @@ public fun cancel_dispute(
         );
     });
 
-    dispute.cancel_dispute();
+    dispute.cancel_dispute(clock);
 }
 
 public fun resolve_one_sided_dispute(
@@ -710,7 +720,7 @@ public fun resolve_one_sided_dispute(
         );
     };
     
-    dispute.resolve_dispute_one_sided(ctx);
+    dispute.resolve_dispute_one_sided(clock, ctx);
 }
 
 public fun complete_dispute(
@@ -850,7 +860,7 @@ public fun complete_dispute(
         );
     };
 
-    dispute.complete_dispute(ctx);
+    dispute.complete_dispute(clock, ctx);
 }
 
 public fun validate_version(court: &Court) {
@@ -1226,6 +1236,7 @@ fun random_nivster_selection(
             event::emit(WorkerPoolEvent {
                 court: object::id(court),
                 nivster,
+                entry: false,
             });
         };
     });

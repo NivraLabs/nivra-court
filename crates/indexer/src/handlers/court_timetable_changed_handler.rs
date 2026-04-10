@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use chrono::Utc;
 use nivra_schema::models::CourtTimetableChangeset;
 use nivra_schema::schema::court;
 use sui_indexer_alt_framework::pipeline::Processor;
@@ -54,7 +55,8 @@ impl Processor for CourtTimetableChangedHandler {
                     draw_period_ms: event.timetable.draw_period_ms as i64, 
                     evidence_period_ms: event.timetable.evidence_period_ms as i64, 
                     voting_period_ms: event.timetable.voting_period_ms as i64, 
-                    appeal_period_ms: event.timetable.appeal_period_ms as i64, 
+                    appeal_period_ms: event.timetable.appeal_period_ms as i64,
+                    modified: Utc::now().naive_utc(), 
                 };
 
                 results.push(data);

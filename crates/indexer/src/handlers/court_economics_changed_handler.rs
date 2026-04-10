@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use chrono::Utc;
 use nivra_schema::models::CourtEconomicsChangeset;
 use nivra_schema::schema::court;
 use sui_indexer_alt_framework::pipeline::Processor;
@@ -58,7 +59,8 @@ impl Processor for CourtEconomicsChangedHandler {
                     dispute_fee: event.economics.dispute_fee as i64, 
                     treasury_share: event.economics.treasury_share as i16, 
                     treasury_share_nvr: event.economics.treasury_share_nvr as i16, 
-                    empty_vote_penalty: event.economics.empty_vote_penalty as i16, 
+                    empty_vote_penalty: event.economics.empty_vote_penalty as i16,
+                    modified: Utc::now().naive_utc(),
                 };
 
                 results.push(data);

@@ -149,7 +149,7 @@ public struct DisputeEvent has copy, drop {
     event_type: u64,
     result: Option<String>,
     votes_per_option: Option<vector<u64>>,
-    // TODO: timestamp!
+    timestamp: u64,
 }
 
 // === Method Aliases ===
@@ -259,6 +259,7 @@ public fun finalize_vote(
             *k
         }),
         votes_per_option: option::some(dispute.result),
+        timestamp: clock.timestamp_ms(),
     });
 }
 
@@ -575,6 +576,7 @@ public fun winner_option_idx(dispute: &Dispute): Option<u64> {
 public fun censor_dispute(
     dispute: &mut Dispute,
     registry: &Registry,
+    clock: &Clock,
     ctx: &mut TxContext,
 ) {
     assert!(
@@ -594,6 +596,7 @@ public fun censor_dispute(
         event_type: dispute_censored(),
         result: option::none(),
         votes_per_option: option::none(),
+        timestamp: clock.timestamp_ms(),
     });
 }
 
@@ -791,6 +794,7 @@ public(package) fun start_response_period(
         event_type: nivra::constants::start_response_period(),
         result: option::none(),
         votes_per_option: option::none(),
+        timestamp: dispute.schedule.round_init_ms,
     });
 }
 
@@ -803,6 +807,7 @@ public(package) fun start_draw_period(dispute: &mut Dispute, clock: &Clock) {
         event_type: nivra::constants::start_draw_period(),
         result: option::none(),
         votes_per_option: option::none(),
+        timestamp: dispute.schedule.round_init_ms,
     });
 }
 
@@ -862,6 +867,7 @@ public(package) fun start_new_round(
         event_type: nivra::constants::start_new_round(),
         result: option::none(),
         votes_per_option: option::none(),
+        timestamp: dispute.schedule.round_init_ms,
     });
 }
 
@@ -884,6 +890,7 @@ public(package) fun start_new_round_tie(
         event_type: nivra::constants::start_tie_round(),
         result: option::none(),
         votes_per_option: option::none(),
+        timestamp: dispute.schedule.round_init_ms,
     });
 }
 
@@ -930,6 +937,7 @@ public(package) fun voters_mut(
 
 public(package) fun cancel_dispute(
     dispute: &mut Dispute,
+    clock: &Clock,
 ) {
     dispute.status = dispute_status_cancelled();
 
@@ -938,11 +946,13 @@ public(package) fun cancel_dispute(
         event_type: nivra::constants::dispute_cancelled(),
         result: option::none(),
         votes_per_option: option::none(),
+        timestamp: clock.timestamp_ms(),
     });
 }
 
 public(package) fun resolve_dispute_one_sided(
     dispute: &mut Dispute,
+    clock: &Clock,
     ctx: &mut TxContext,
 ) {
     dispute.status = dispute_status_completed_one_sided();
@@ -971,11 +981,13 @@ public(package) fun resolve_dispute_one_sided(
         event_type: nivra::constants::dispute_completed_one_sided(),
         result: option::some(*winner_option),
         votes_per_option: option::none(),
+        timestamp: clock.timestamp_ms(),
     });
 }
 
 public(package) fun complete_dispute(
     dispute: &mut Dispute,
+    clock: &Clock,
     ctx: &mut TxContext,
 ) {
     dispute.status = dispute_status_completed();
@@ -1001,6 +1013,7 @@ public(package) fun complete_dispute(
         event_type: nivra::constants::dispute_completed(),
         result: winner_option,
         votes_per_option: option::none(),
+        timestamp: clock.timestamp_ms(),
     });
 }
 

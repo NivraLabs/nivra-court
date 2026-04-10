@@ -8,4 +8,4 @@ sui-field-count = { git = "https://github.com/MystenLabs/sui.git", branch = "tes
 diesel = { workspace = true, features = ["postgres", "64-column-tables", "chrono"] }
 diesel_migrations.workspace = true
 serde = { workspace = true }
-chrono.workspace = true
+chrono = { workspace = true, features = ["serde"] }

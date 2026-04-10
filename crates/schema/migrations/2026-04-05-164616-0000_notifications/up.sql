@@ -9,12 +9,15 @@ CREATE TABLE IF NOT EXISTS nivster_notification
     custom_msg                  TEXT,
     valid_timestamp_ms          BIGINT       NOT NULL,
     expires_timestamp_ms        BIGINT       NOT NULL,
-    checked                     BOOLEAN      NOT NULL
+    checked                     BOOLEAN      NOT NULL,
+    created_at                  TIMESTAMP    DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
+
+CREATE INDEX idx_notification_nivster_created ON nivster_notification(created_at);
 
 CREATE INDEX idx_notification_nivster ON nivster_notification
 (nivster, valid_timestamp_ms, expires_timestamp_ms, checked) 
-INCLUDE (id, notification_type, custom_msg);
+INCLUDE (id, notification_type, custom_msg, dispute);
 
 CREATE TABLE IF NOT EXISTS party_notification
 (
@@ -25,8 +28,11 @@ CREATE TABLE IF NOT EXISTS party_notification
     custom_msg                  TEXT,
     valid_timestamp_ms          BIGINT       NOT NULL,
     expires_timestamp_ms        BIGINT       NOT NULL,
-    checked                     BOOLEAN      NOT NULL
+    checked                     BOOLEAN      NOT NULL,
+    created_at                  TIMESTAMP    DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
+
+CREATE INDEX idx_notification_party_created ON party_notification(created_at);
 
 CREATE INDEX idx_notification_party ON party_notification
 (party, valid_timestamp_ms, expires_timestamp_ms, checked) 

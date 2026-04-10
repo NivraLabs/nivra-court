@@ -29,7 +29,9 @@ CREATE TABLE IF NOT EXISTS court
     empty_vote_penalty          SMALLINT     NOT NULL,
     status                      SMALLINT     NOT NULL,
     sender                      TEXT         NOT NULL,
-    checkpoint_timestamp_ms     BIGINT       NOT NULL
+    checkpoint_timestamp_ms     BIGINT       NOT NULL,
+    modified                    TIMESTAMP    DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
+CREATE INDEX idx_court_modified ON court(modified);
 CREATE INDEX idx_court_category ON court(category);

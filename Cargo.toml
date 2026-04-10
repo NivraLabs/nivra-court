@@ -3,7 +3,8 @@ resolver = "3"
 
 members = [
     "crates/indexer",
-    "crates/schema",
+    "crates/schema", 
+    "crates/server",
 ]
 
 [workspace.dependencies]

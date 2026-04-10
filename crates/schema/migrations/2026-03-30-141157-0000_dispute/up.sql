@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS dispute
     appeals_used                SMALLINT     NOT NULL,
     max_appeals                 SMALLINT     NOT NULL,
     initiator                   TEXT         NOT NULL,
+    last_payer                  TEXT         NOT NULL,
     options                     TEXT[]       NOT NULL,
     options_party_mapping       TEXT[]       NOT NULL,
     round_init_ms               BIGINT       NOT NULL,
@@ -55,11 +56,11 @@ CREATE TABLE IF NOT EXISTS dispute_party
 (
     dispute_id                  TEXT         NOT NULL REFERENCES dispute(dispute_id),
     party                       TEXT         NOT NULL,
+    checkpoint_timestamp_ms     BIGINT       NOT NULL,
     PRIMARY KEY (dispute_id, party)
 );
 
-CREATE INDEX idx_dispute_party ON dispute_party(party) INCLUDE (dispute_id);
-CREATE INDEX idx_dispute_party_id ON dispute_party(dispute_id) INCLUDE (party);
+CREATE INDEX idx_dispute_party_id ON dispute_party(checkpoint_timestamp_ms, dispute_id, party);
 
 CREATE TABLE IF NOT EXISTS dispute_nivster
 (
@@ -72,8 +73,8 @@ CREATE TABLE IF NOT EXISTS dispute_nivster
     PRIMARY KEY (dispute_id, nivster)
 );
 
-CREATE INDEX idx_dispute_nivster ON dispute_nivster(nivster)
-INCLUDE (dispute_id, votes, stake);
+CREATE INDEX idx_dispute_nivster_created_at ON 
+dispute_nivster(nivster, checkpoint_timestamp_ms) INCLUDE (dispute_id, votes, stake);
 
 CREATE TABLE IF NOT EXISTS dispute_event
 (
@@ -82,6 +83,7 @@ CREATE TABLE IF NOT EXISTS dispute_event
     event_type                  SMALLINT     NOT NULL,
     result                      TEXT,
     votes_per_option            INTEGER[],
+    timestamp                   BIGINT       NOT NULL,
     sender                      TEXT         NOT NULL,
     checkpoint_timestamp_ms     BIGINT       NOT NULL
 );

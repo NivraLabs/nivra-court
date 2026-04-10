@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use nivra_schema::models::WorkerPool;
-use nivra_schema::schema::worker_pool;
+use chrono::Utc;
+use diesel::upsert::excluded;
+use nivra_schema::models::NivsterCourtBalance;
+use nivra_schema::schema::nivster_court_balance;
 use sui_indexer_alt_framework::pipeline::Processor;
 use sui_indexer_alt_framework::pipeline::sequential::Handler;
 use sui_indexer_alt_framework::types::full_checkpoint_content::Checkpoint;
@@ -29,7 +31,7 @@ impl WorkerPoolEventHandler {
 #[async_trait]
 impl Processor for WorkerPoolEventHandler {
     const NAME: &'static str = "worker_pool_event_handler";
-    type Value = WorkerPool;
+    type Value = NivsterCourtBalance;
 
     async fn process(&self, checkpoint: &Arc<Checkpoint>) -> anyhow::Result<Vec<Self::Value>> {
         let mut results = vec![];
@@ -48,10 +50,14 @@ impl Processor for WorkerPoolEventHandler {
                 }
 
                 let event: WorkerPoolEvent = bcs::from_bytes(&ev.contents)?;
-                let data = WorkerPool { 
+                let data = NivsterCourtBalance { 
                     court: event.court.to_string(), 
-                    nivster: event.nivster.to_string(), 
-                    active: true, 
+                    nivster: event.nivster.to_string(),
+                    nvr: 0,
+                    sui: 0,
+                    locked_nvr: 0,
+                    in_worker_pool: event.entry,
+                    modified_at: Utc::now().naive_utc(),
                 };
 
                 results.push(data);
@@ -72,16 +78,17 @@ impl Handler for WorkerPoolEventHandler {
     }
 
     async fn commit<'a>(&self, batch: &Self::Batch, conn: &mut Connection<'a>) -> anyhow::Result<usize> {
-        let rows_affected = diesel::insert_into(worker_pool::table)
+        let rows_affected = diesel::insert_into(nivster_court_balance::table)
             .values(batch)
             .on_conflict((
-                worker_pool::court,
-                worker_pool::nivster,
+                nivster_court_balance::court,
+                nivster_court_balance::nivster,
             ))
             .do_update()
-            .set(
-                worker_pool::active.eq(diesel::dsl::not(worker_pool::active))
-            )
+            .set((
+                nivster_court_balance::in_worker_pool.eq(excluded(nivster_court_balance::in_worker_pool)),
+                nivster_court_balance::modified_at.eq(Utc::now().naive_utc()),
+            ))
             .execute(conn)
             .await?;
 

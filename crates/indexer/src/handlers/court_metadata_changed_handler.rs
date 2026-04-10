@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use chrono::Utc;
 use nivra_schema::models::CourtMetadataChangeset;
 use nivra_schema::schema::court;
 use sui_indexer_alt_framework::pipeline::Processor;
@@ -53,7 +54,8 @@ impl Processor for CourtMetadataChangedHandler {
                     name: event.metadata.name, 
                     category: event.metadata.category, 
                     description: event.metadata.description, 
-                    ai_court: event.metadata.ai_court, 
+                    ai_court: event.metadata.ai_court,
+                    modified: Utc::now().naive_utc(),
                 };
 
                 results.push(data);

@@ -2,13 +2,14 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use nivra_schema::models::NewDisputePayment;
-use nivra_schema::schema::dispute_payment;
+use nivra_schema::schema::{dispute, dispute_payment};
 use sui_indexer_alt_framework::pipeline::Processor;
 use sui_indexer_alt_framework::pipeline::sequential::Handler;
 use sui_indexer_alt_framework::types::full_checkpoint_content::Checkpoint;
 use sui_indexer_alt_framework::postgres::{Connection, Db};
 use sui_types::transaction::TransactionDataAPI;
 use diesel_async::RunQueryDsl;
+use diesel::prelude::*;
 
 use crate::NivraEnv;
 use crate::handlers::has_nivra_events;
@@ -77,6 +78,14 @@ impl Handler for DisputePaymentHandler {
     }
 
     async fn commit<'a>(&self, batch: &Self::Batch, conn: &mut Connection<'a>) -> anyhow::Result<usize> {
+
+        for payment in batch.iter() {
+            diesel::update(dispute::table.find(payment.dispute_id.clone()))
+                .set(dispute::last_payer.eq(payment.party.clone()))
+                .execute(conn)
+                .await?;
+        }
+
         let inserted = diesel::insert_into(dispute_payment::table)
             .values(batch)
             .on_conflict_do_nothing()

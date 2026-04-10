@@ -42,7 +42,7 @@ pub const BALANCE_UNLOCKED_WITH_REWARD: i16 = 6;
 
 // Party notification types.
 pub const DISPUTE_OPENED: i16 = 1;
-pub const APPEAL_OPENED: i16 = 2;   
+pub const APPEAL_OPENED: i16 = 2;
 pub const DISPUTE_ACCEPTED: i16 = 3;
 pub const APPEAL_ACCEPTED: i16 = 4;
 pub const EVIDENCE_PERIOD_STARTED: i16 = 5;

@@ -142,6 +142,7 @@ pub mod nivra {
         pub struct WorkerPoolEvent {
             pub court: ObjectID,
             pub nivster: Address,
+            pub entry: bool,
         }
 
         impl MoveStruct for WorkerPoolEvent {
@@ -224,6 +225,7 @@ pub mod nivra {
             pub event_type: u64,
             pub result: Option<String>,
             pub votes_per_option: Option<Vec<u64>>,
+            pub timestamp: u64,
         }
 
         impl MoveStruct for DisputeEvent {

@@ -50,6 +50,7 @@ diesel::table! {
         status -> Int2,
         sender -> Text,
         checkpoint_timestamp_ms -> Int8,
+        modified -> Timestamp,
     }
 }
 
@@ -66,6 +67,7 @@ diesel::table! {
         appeals_used -> Int2,
         max_appeals -> Int2,
         initiator -> Text,
+        last_payer -> Text,
         options -> Array<Nullable<Text>>,
         options_party_mapping -> Array<Nullable<Text>>,
         round_init_ms -> Int8,
@@ -93,6 +95,7 @@ diesel::table! {
         event_type -> Int2,
         result -> Nullable<Text>,
         votes_per_option -> Nullable<Array<Nullable<Int4>>>,
+        timestamp -> Int8,
         sender -> Text,
         checkpoint_timestamp_ms -> Int8,
     }
@@ -113,6 +116,7 @@ diesel::table! {
     dispute_party (dispute_id, party) {
         dispute_id -> Text,
         party -> Text,
+        checkpoint_timestamp_ms -> Int8,
     }
 }
 
@@ -147,6 +151,18 @@ diesel::table! {
 }
 
 diesel::table! {
+    nivster_court_balance (court, nivster) {
+        court -> Text,
+        nivster -> Text,
+        nvr -> Int8,
+        sui -> Int8,
+        locked_nvr -> Int8,
+        in_worker_pool -> Bool,
+        modified_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     nivster_notification (id) {
         id -> Int8,
         nivster -> Text,
@@ -156,6 +172,19 @@ diesel::table! {
         valid_timestamp_ms -> Int8,
         expires_timestamp_ms -> Int8,
         checked -> Bool,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    nivster_stats (nivster) {
+        nivster -> Text,
+        total_cases -> Int8,
+        cases_won -> Int8,
+        nvr_won -> Int8,
+        nvr_slashes -> Int8,
+        sui_won -> Int8,
+        modified_at -> Timestamp,
     }
 }
 
@@ -169,6 +198,18 @@ diesel::table! {
         valid_timestamp_ms -> Int8,
         expires_timestamp_ms -> Int8,
         checked -> Bool,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    party_stats (party) {
+        party -> Text,
+        total_cases -> Int8,
+        cases_won -> Int8,
+        cases_lost -> Int8,
+        cases_cancelled -> Int8,
+        modified_at -> Timestamp,
     }
 }
 
@@ -186,14 +227,6 @@ diesel::table! {
     }
 }
 
-diesel::table! {
-    worker_pool (court, nivster) {
-        court -> Text,
-        nivster -> Text,
-        active -> Bool,
-    }
-}
-
 diesel::joinable!(balance_event -> court (court));
 diesel::joinable!(balance_event -> dispute (dispute_id));
 diesel::joinable!(dispute -> court (court_id));
@@ -202,9 +235,9 @@ diesel::joinable!(dispute_nivster -> dispute (dispute_id));
 diesel::joinable!(dispute_party -> dispute (dispute_id));
 diesel::joinable!(dispute_payment -> dispute (dispute_id));
 diesel::joinable!(evidence -> dispute (dispute_id));
+diesel::joinable!(nivster_court_balance -> court (court));
 diesel::joinable!(nivster_notification -> dispute (dispute));
 diesel::joinable!(party_notification -> dispute (dispute));
-diesel::joinable!(worker_pool -> court (court));
 
 diesel::allow_tables_to_appear_in_same_query!(
     admin_vote,
@@ -216,8 +249,10 @@ diesel::allow_tables_to_appear_in_same_query!(
     dispute_party,
     dispute_payment,
     evidence,
+    nivster_court_balance,
     nivster_notification,
+    nivster_stats,
     party_notification,
+    party_stats,
     watermarks,
-    worker_pool,
 );

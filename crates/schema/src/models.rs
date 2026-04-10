@@ -1,9 +1,9 @@
 use chrono::NaiveDateTime;
 use diesel::{AsChangeset, Identifiable, Insertable, Queryable, Selectable};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sui_field_count::FieldCount;
 
-use crate::schema::{admin_vote, balance_event, court, dispute, dispute_event, dispute_nivster, dispute_party, dispute_payment, evidence, nivster_notification, party_notification, worker_pool};
+use crate::schema::{admin_vote, balance_event, court, dispute, dispute_event, dispute_nivster, dispute_party, dispute_payment, evidence, nivster_court_balance, nivster_notification, nivster_stats, party_notification, party_stats};
 
 #[derive(Queryable, Selectable, Insertable, Identifiable, FieldCount, Debug)]
 #[diesel(table_name = admin_vote, primary_key(vote_id))]
@@ -42,6 +42,31 @@ pub struct Court {
     pub checkpoint_timestamp_ms: i64,
 }
 
+#[derive(Queryable, Selectable, Serialize, Debug)]
+#[diesel(table_name = court, primary_key(court_id))]
+pub struct CourtResponse {
+    pub court_id: String,
+    pub name: String,
+    pub category: String,
+    pub description: String,
+    pub ai_court: bool,
+    pub response_period_ms: i64,
+    pub draw_period_ms: i64,
+    pub evidence_period_ms: i64,
+    pub voting_period_ms: i64,
+    pub appeal_period_ms: i64,
+    pub min_stake: i64,
+    pub reputation_requirement: i16,
+    pub init_nivster_count: i16,
+    pub sanction_model: i16,
+    pub coefficient: i16,
+    pub dispute_fee: i64,
+    pub treasury_share: i16,
+    pub treasury_share_nvr: i16,
+    pub empty_vote_penalty: i16,
+    pub status: i16,
+}
+
 #[derive(AsChangeset)]
 #[diesel(table_name = court, primary_key(court_id))]
 pub struct CourtMetadataChangeset {
@@ -50,6 +75,7 @@ pub struct CourtMetadataChangeset {
     pub category: String,
     pub description: String,
     pub ai_court: bool,
+    pub modified: NaiveDateTime,
 }
 
 #[derive(AsChangeset)]
@@ -61,6 +87,7 @@ pub struct CourtTimetableChangeset {
     pub evidence_period_ms: i64,
     pub voting_period_ms: i64,
     pub appeal_period_ms: i64,
+    pub modified: NaiveDateTime,
 }
 
 #[derive(AsChangeset)]
@@ -76,6 +103,7 @@ pub struct CourtEconomicsChangeset {
     pub treasury_share: i16,
     pub treasury_share_nvr: i16,
     pub empty_vote_penalty: i16,
+    pub modified: NaiveDateTime,
 }
 
 #[derive(AsChangeset)]
@@ -83,6 +111,7 @@ pub struct CourtEconomicsChangeset {
 pub struct CourtOperationChangeset {
     pub court_id: String,
     pub status: i16,
+    pub modified: NaiveDateTime,
 }
 
 #[derive(Queryable, Selectable, Insertable, Identifiable, FieldCount, Debug)]
@@ -99,6 +128,7 @@ pub struct Dispute {
     pub appeals_used: i16,
     pub max_appeals: i16,
     pub initiator: String,
+    pub last_payer: String,
     pub options: Vec<String>,
     pub options_party_mapping: Vec<String>,
     pub round_init_ms: i64,
@@ -126,6 +156,7 @@ pub struct DisputeEvent {
     pub event_type: i16,
     pub result: Option<String>,
     pub votes_per_option: Option<Vec<i32>>,
+    pub timestamp: i64,
     pub sender: String,
     pub checkpoint_timestamp_ms: i64,
 }
@@ -137,6 +168,7 @@ pub struct NewDisputeEvent {
     pub event_type: i16,
     pub result: Option<String>,
     pub votes_per_option: Option<Vec<i32>>,
+    pub timestamp: i64,
     pub sender: String,
     pub checkpoint_timestamp_ms: i64,
 }
@@ -147,6 +179,7 @@ pub struct NewDisputeEvent {
 pub struct DisputeParty {
     pub dispute_id: String,
     pub party: String,
+    pub checkpoint_timestamp_ms: i64,
 }
 
 #[derive(Queryable, Selectable, Insertable, Identifiable, Debug)]
@@ -213,13 +246,40 @@ pub struct NewBalanceEvent {
     pub checkpoint_timestamp_ms: i64,
 }
 
-#[derive(Queryable, Selectable, Insertable, Identifiable, Debug)]
-#[diesel(table_name = worker_pool)]
+#[derive(Queryable, Selectable, Insertable, Identifiable, AsChangeset, Debug)]
+#[diesel(table_name = nivster_court_balance)]
 #[diesel(primary_key(court, nivster))]
-pub struct WorkerPool {
+pub struct NivsterCourtBalance {
     pub court: String,
     pub nivster: String,
-    pub active: bool,
+    pub nvr: i64,
+    pub sui: i64,
+    pub locked_nvr: i64,
+    pub in_worker_pool: bool,
+    pub modified_at: NaiveDateTime,
+}
+
+#[derive(Queryable, Selectable, Serialize, Debug)]
+#[diesel(table_name = nivster_court_balance)]
+#[diesel(primary_key(court, nivster))]
+pub struct NivsterCourtBalanceResult {
+    pub court: String,
+    pub nvr: i64,
+    pub sui: i64,
+    pub locked_nvr: i64,
+    pub in_worker_pool: bool,
+}
+
+#[derive(Queryable, Selectable, Insertable, Identifiable, Debug)]
+#[diesel(table_name = nivster_stats, primary_key(nivster))]
+pub struct NivsterStats {
+    pub nivster: String,
+    pub total_cases: i64,
+    pub cases_won: i64,
+    pub nvr_won: i64,
+    pub nvr_slashes: i64,
+    pub sui_won: i64,
+    pub modified_at: NaiveDateTime,
 }
 
 #[derive(Queryable, Selectable, Insertable, Identifiable, Debug)]
@@ -299,4 +359,14 @@ pub struct NewPartyNotificationRef<'a> {
     pub valid_timestamp_ms: i64,
     pub expires_timestamp_ms: i64,
     pub checked: bool,
+}
+
+#[derive(Queryable, Selectable, Insertable, Identifiable, Serialize, Debug)]
+#[diesel(table_name = party_stats, primary_key(party))]
+pub struct PartyStats {
+    pub party: String,
+    pub total_cases: i64,
+    pub cases_won: i64,
+    pub cases_lost: i64,
+    pub cases_cancelled: i64,
 }
