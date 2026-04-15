@@ -119,6 +119,8 @@ public struct NivraResult has key, store {
 use fun nivra::vec_map::eq as VecMap.eq;
 
 // === Public Functions ===
+// TODO: winner option index function
+
 fun init(otw: NIVRA_RESULT, ctx: &mut TxContext) {
     let publisher = sui::package::claim(otw, ctx);
     let mut result_display = 

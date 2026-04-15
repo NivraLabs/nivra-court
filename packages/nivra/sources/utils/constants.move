@@ -29,10 +29,10 @@ const DISPUTE_STATUS_DRAW: u64 = 2;
 const DISPUTE_STATUS_ACTIVE: u64 = 3;
 const DISPUTE_STATUS_TIE: u64 = 4;
 const DISPUTE_STATUS_TALLIED: u64 = 5;
-const DISPUTE_STATUS_COMPLETED: u64 = 6;
-const DISPUTE_STATUS_COMPLETED_ONE_SIDED: u64 = 7;
-const DISPUTE_STATUS_CANCELLED: u64 = 8;
-const DISPUTE_STATUS_CENSORED: u64 = 9;
+const DISPUTE_STATUS_CENSORED: u64 = 6;
+const DISPUTE_STATUS_COMPLETED: u64 = 7;
+const DISPUTE_STATUS_DEFAULTED: u64 = 8;
+const DISPUTE_STATUS_CANCELLED: u64 = 9;
 
 // Dispute event types.
 const START_RESPONSE_PERIOD: u64 = 1;
@@ -43,7 +43,7 @@ const VOTE_FINALIZED: u64 = 5;
 const DISPUTE_CENSORED: u64 = 6;
 const DISPUTE_CANCELLED: u64 = 7;
 const DISPUTE_COMPLETED: u64 = 8;
-const DISPUTE_COMPLETED_ONE_SIDED: u64 = 9;
+const DISPUTE_DEFAULTED: u64 = 9;
 
 // Dispute rules.
 const MAX_APPEALS_LIMIT: u8 = 3;
@@ -117,8 +117,8 @@ public fun dispute_status_completed(): u64 {
     DISPUTE_STATUS_COMPLETED
 }
 
-public fun dispute_status_completed_one_sided(): u64 {
-    DISPUTE_STATUS_COMPLETED_ONE_SIDED
+public fun dispute_status_defaulted(): u64 {
+    DISPUTE_STATUS_DEFAULTED
 }
 
 public fun dispute_status_cancelled(): u64 {
@@ -325,6 +325,6 @@ public fun dispute_completed(): u64 {
     DISPUTE_COMPLETED
 }
 
-public fun dispute_completed_one_sided(): u64 {
-    DISPUTE_COMPLETED_ONE_SIDED
+public fun dispute_defaulted(): u64 {
+    DISPUTE_DEFAULTED
 }

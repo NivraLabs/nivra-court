@@ -1,0 +1,6 @@
+[package]
+name = "marketplace"
+edition = "2024"
+
+[dependencies]
+nivra = { git = "https://github.com/NivraLabs/nivra-court.git", subdir = "packages/nivra", rev = "main" }

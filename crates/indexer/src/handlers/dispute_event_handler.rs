@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chrono::Utc;
 use diesel::upsert::excluded;
-use nivra_schema::constants::{DISPUTE_APPEAL_FEE, DISPUTE_CANCELLED, DISPUTE_CENSORED, DISPUTE_COMPLETED, DISPUTE_COMPLETED_ONE_SIDED, DISPUTE_STATUS_ACTIVE, DISPUTE_STATUS_CANCELLED, DISPUTE_STATUS_CENSORED, DISPUTE_STATUS_COMPLETED, DISPUTE_STATUS_COMPLETED_ONE_SIDED, DISPUTE_STATUS_DRAW, DISPUTE_STATUS_RESPONSE, DISPUTE_STATUS_TALLIED, DISPUTE_STATUS_TIE, START_DRAW_PERIOD, START_NEW_ROUND, START_RESPONSE_PERIOD, START_TIE_ROUND, VOTE_FINALIZED};
+use nivra_schema::constants::{DISPUTE_APPEAL_FEE, DISPUTE_CANCELLED, DISPUTE_CENSORED, DISPUTE_COMPLETED, DISPUTE_DEFAULTED, DISPUTE_STATUS_ACTIVE, DISPUTE_STATUS_CANCELLED, DISPUTE_STATUS_CENSORED, DISPUTE_STATUS_COMPLETED, DISPUTE_STATUS_DEFAULTED, DISPUTE_STATUS_DRAW, DISPUTE_STATUS_RESPONSE, DISPUTE_STATUS_TALLIED, DISPUTE_STATUS_TIE, START_DRAW_PERIOD, START_NEW_ROUND, START_RESPONSE_PERIOD, START_TIE_ROUND, VOTE_FINALIZED};
 use nivra_schema::models::{NewDisputeEvent, NewNivsterNotification, NewPartyNotification, PartyStats};
 use nivra_schema::schema::dispute::{options, options_party_mapping};
 use nivra_schema::schema::{dispute, dispute_event, dispute_payment, nivster_notification, party_notification, party_stats};
@@ -238,14 +238,14 @@ impl Handler for DisputeEventHandler {
 
                     nivster_notifications.append(&mut n_notifications);
                 },
-                DISPUTE_COMPLETED_ONE_SIDED => {
+                DISPUTE_DEFAULTED => {
                     let result = &ev.result;
                     let dispute_id = &ev.dispute_id;
 
                     let (parties, winner_p) = update_dispute_with_winner(
                         dispute_id, 
                         result,
-                        DISPUTE_STATUS_COMPLETED_ONE_SIDED,
+                        DISPUTE_STATUS_DEFAULTED,
                         conn
                     ).await?;
 
@@ -262,7 +262,7 @@ impl Handler for DisputeEventHandler {
 
                     let mut n_notifications = notify_nivsters_dispute_resolved(
                         dispute_id, 
-                        DISPUTE_COMPLETED_ONE_SIDED, 
+                        DISPUTE_DEFAULTED, 
                         ev.checkpoint_timestamp_ms, 
                         conn
                     ).await?;

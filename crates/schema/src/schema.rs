@@ -59,6 +59,7 @@ diesel::table! {
         dispute_id -> Text,
         contract_id -> Text,
         court_id -> Text,
+        description -> Text,
         dispute_status -> Int2,
         vote_result -> Nullable<Array<Nullable<Int4>>>,
         winner_option -> Nullable<Text>,

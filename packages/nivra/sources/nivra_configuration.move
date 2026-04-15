@@ -128,6 +128,9 @@ public struct NivraConfiguration has copy, drop, store {
     max_appeals: u8,
     file_hashes: vector<vector<u8>>,
     hashing_algorithm: u64,
+    // TODO: add validity timestamps?
+    // TODO: dispute lock
+    // TODO: config identifier?
 }
 
 // === Method Aliases ===

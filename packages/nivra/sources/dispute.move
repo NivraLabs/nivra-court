@@ -26,7 +26,7 @@ use nivra::constants::dispute_status_tie;
 use nivra::constants::dispute_status_tallied;
 use nivra::constants::dispute_status_cancelled;
 use nivra::constants::dispute_refund;
-use nivra::constants::dispute_status_completed_one_sided;
+use nivra::constants::dispute_status_defaulted;
 use nivra::constants::dispute_status_completed;
 use nivra::constants::dispute_status_censored;
 use nivra::registry::Registry;
@@ -55,6 +55,7 @@ public struct Dispute has key {
     id: UID,
     contract: ID,
     court: ID,
+    description: String,
     status: u64,
     round: u64,
     max_appeals: u8,
@@ -122,6 +123,7 @@ public struct DisputeCreatedEvent has copy, drop {
     dispute: ID,
     contract: ID,
     court: ID,
+    description: String,
     max_appeals: u8,
     initiator: address,
     options: vector<String>,
@@ -581,7 +583,7 @@ public fun censor_dispute(
 ) {
     assert!(
         dispute.status != dispute_status_cancelled() &&
-        dispute.status != dispute_status_completed_one_sided() &&
+        dispute.status != dispute_status_defaulted() &&
         dispute.status != dispute_status_completed(), 
         EDisputeAlreadyResolved
     );
@@ -604,6 +606,7 @@ public fun censor_dispute(
 public(package) fun create_dispute(
     contract: ID,
     court: ID,
+    description: String,
     max_appeals: u8,
     options: VecMap<String, address>,
     schedule: Schedule,
@@ -619,6 +622,7 @@ public(package) fun create_dispute(
         id: object::new(ctx),
         contract,
         court,
+        description,
         status: dispute_status_response(),
         round: 0,
         max_appeals,
@@ -666,6 +670,7 @@ public(package) fun share_dispute(
         dispute: object::id(&dispute),
         contract: dispute.contract,
         court: dispute.court,
+        description: dispute.description,
         max_appeals: dispute.max_appeals,
         initiator: dispute.initiator,
         options,
@@ -950,12 +955,12 @@ public(package) fun cancel_dispute(
     });
 }
 
-public(package) fun resolve_dispute_one_sided(
+public(package) fun resolve_dispute_defaulted(
     dispute: &mut Dispute,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
-    dispute.status = dispute_status_completed_one_sided();
+    dispute.status = dispute_status_defaulted();
 
     let winner_party = dispute.last_payer;
     let mso = dispute.options.mso_idx!(winner_party);
@@ -978,7 +983,7 @@ public(package) fun resolve_dispute_one_sided(
 
     event::emit(DisputeEvent {
         dispute: object::id(dispute),
-        event_type: nivra::constants::dispute_completed_one_sided(),
+        event_type: nivra::constants::dispute_defaulted(),
         result: option::some(*winner_option),
         votes_per_option: option::none(),
         timestamp: clock.timestamp_ms(),

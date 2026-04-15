@@ -44,6 +44,20 @@ pub struct Court {
 
 #[derive(Queryable, Selectable, Serialize, Debug)]
 #[diesel(table_name = court, primary_key(court_id))]
+pub struct CourtDisputeOverview {
+    pub status: i16,
+    pub name: String,
+    pub ai_court: bool,
+    pub response_period_ms: i64,
+    pub evidence_period_ms: i64,
+    pub voting_period_ms: i64,
+    pub appeal_period_ms: i64,
+    pub init_nivster_count: i16,
+    pub dispute_fee: i64,
+}
+
+#[derive(Queryable, Selectable, Serialize, Debug)]
+#[diesel(table_name = court, primary_key(court_id))]
 pub struct CourtResponse {
     pub court_id: String,
     pub name: String,
@@ -120,6 +134,7 @@ pub struct Dispute {
     pub dispute_id: String,
     pub contract_id: String,
     pub court_id: String,
+    pub description: String,
     pub dispute_status: i16,
     pub vote_result: Option<Vec<i32>>,
     pub winner_option: Option<String>,
@@ -145,6 +160,29 @@ pub struct Dispute {
     pub treasury_share_nvr: i16,
     pub empty_vote_penalty: i16,
     pub sender: String,
+    pub checkpoint_timestamp_ms: i64,
+}
+
+#[derive(Queryable, Selectable, Serialize, Debug)]
+#[diesel(table_name = dispute, primary_key(dispute_id))]
+pub struct DisputeDetailsResponse {
+    pub dispute_id: String,
+    pub contract_id: String,
+    pub court_id: String,
+    pub description: String,
+    pub dispute_status: i16,
+    pub winner_option: Option<String>,
+    pub winner_party: Option<String>,
+    pub current_round: i16,
+    pub appeals_used: i16,
+    pub options: Vec<Option<String>>,
+    pub options_party_mapping: Vec<Option<String>>,
+    pub round_init_ms: i64,
+    pub response_period_ms: i64,
+    pub draw_period_ms: i64,
+    pub evidence_period_ms: i64,
+    pub voting_period_ms: i64,
+    pub appeal_period_ms: i64,
     pub checkpoint_timestamp_ms: i64,
 }
 

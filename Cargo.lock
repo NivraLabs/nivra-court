@@ -5294,6 +5294,7 @@ dependencies = [
  "futures",
  "nivra-schema",
  "serde",
+ "tokio",
  "url",
 ]
 

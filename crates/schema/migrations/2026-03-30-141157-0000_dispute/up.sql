@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS dispute
     dispute_id                  TEXT         PRIMARY KEY,
     contract_id                 TEXT         NOT NULL,
     court_id                    TEXT         NOT NULL REFERENCES court(court_id),
+    description                 TEXT         NOT NULL,
     dispute_status              SMALLINT     NOT NULL,
     vote_result                 INTEGER[],
     winner_option               TEXT,
@@ -38,6 +39,8 @@ CREATE EXTENSION IF NOT EXISTS btree_gin;
 CREATE INDEX idx_dispute_config ON dispute USING GIN 
 (contract_id, court_id, max_appeals, options, options_party_mapping);
 
+CREATE INDEX idx_dispute_status ON dispute(dispute_status, round_init_ms);
+
 CREATE TABLE IF NOT EXISTS dispute_payment
 (
     id                          BIGSERIAL    PRIMARY KEY,
@@ -60,7 +63,8 @@ CREATE TABLE IF NOT EXISTS dispute_party
     PRIMARY KEY (dispute_id, party)
 );
 
-CREATE INDEX idx_dispute_party_id ON dispute_party(checkpoint_timestamp_ms, dispute_id, party);
+CREATE INDEX idx_dispute_party_id ON dispute_party(party, dispute_id);
+CREATE INDEX idx_dispute_party_ts ON dispute_party(checkpoint_timestamp_ms);
 
 CREATE TABLE IF NOT EXISTS dispute_nivster
 (

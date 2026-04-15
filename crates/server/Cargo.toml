@@ -12,6 +12,7 @@ nivra-schema = { path = "../schema" }
 clap = { workspace = true, features = ["env", "derive"] }
 diesel = { workspace = true, features = ["postgres", "chrono"] }
 diesel-async = { workspace = true, features = ["bb8", "postgres"] }
+tokio = { workspace = true, features = ["full"] }
 anyhow.workspace = true
 serde.workspace = true
 chrono.workspace = true

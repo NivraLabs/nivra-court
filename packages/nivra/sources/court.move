@@ -420,7 +420,8 @@ public fun open_dispute(
     // Create & register a new dispute.
     let dispute = create_dispute(
         contract,
-        object::id(court), 
+        object::id(court),
+        description,
         max_appeals, 
         options_mapping, 
         court.timetable.to_dispute_schedule_snapshot(clock), 
@@ -583,7 +584,7 @@ public fun cancel_dispute(
     dispute.cancel_dispute(clock);
 }
 
-public fun resolve_one_sided_dispute(
+public fun resolve_one_defaulted(
     court: &mut Court,
     dispute: &mut Dispute,
     registry: &mut Registry,
@@ -720,7 +721,7 @@ public fun resolve_one_sided_dispute(
         );
     };
     
-    dispute.resolve_dispute_one_sided(clock, ctx);
+    dispute.resolve_dispute_defaulted(clock, ctx);
 }
 
 public fun complete_dispute(

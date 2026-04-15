@@ -181,6 +181,7 @@ pub mod nivra {
             pub dispute: ObjectID,
             pub contract: ObjectID,
             pub court: ObjectID,
+            pub description: String,
             pub max_appeals: u8,
             pub initiator: Address,
             pub options: Vec<String>,

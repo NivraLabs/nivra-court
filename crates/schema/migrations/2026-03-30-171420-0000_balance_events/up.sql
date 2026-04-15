@@ -32,8 +32,7 @@ CREATE TABLE IF NOT EXISTS nivster_court_balance
 CREATE INDEX idx_nivster_court_balance ON nivster_court_balance(nivster)
 INCLUDE (court, nvr, sui, locked_nvr, in_worker_pool);
 
-CREATE INDEX idx_worker_pool_court ON nivster_court_balance(court) 
-INCLUDE (in_worker_pool);
+CREATE INDEX idx_worker_pool_court ON nivster_court_balance(court, in_worker_pool);
 
 CREATE TABLE IF NOT EXISTS nivster_stats
 (

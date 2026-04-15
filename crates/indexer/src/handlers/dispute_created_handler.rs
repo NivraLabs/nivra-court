@@ -59,6 +59,7 @@ impl Processor for DisputeCreatedHandler {
                     dispute_id: event.dispute.to_string(), 
                     contract_id: event.contract.to_string(), 
                     court_id: event.court.to_string(),
+                    description: event.description,
                     dispute_status: DISPUTE_STATUS_RESPONSE,
                     vote_result: None,
                     winner_option: None,
