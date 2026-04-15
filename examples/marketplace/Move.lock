@@ -23,13 +23,13 @@ manifest_digest = "EFA8E762EAF292EEA5955D4D3BBEB5334735E8BB2D4A059C998DDE825D0FC
 deps = { nivra = "nivra", std = "MoveStdlib", sui = "Sui" }
 
 [pinned.testnet.nivra]
-source = { git = "https://github.com/NivraLabs/nivra-court.git", subdir = "packages/nivra", rev = "1d5c38e08b75f9130216ff8420ab0f1fad0ab869" }
+source = { git = "https://github.com/NivraLabs/nivra-court.git", subdir = "packages/nivra", rev = "161af27ac2c158461024773c4ac0d740c2abc468" }
 use_environment = "testnet"
 manifest_digest = "2E8F56A5C22CED5BCD96EE27F9F0056C7376F4CFA1D57A75257B3C67C8802D82"
 deps = { nvr = "nvr", seal = "seal", std = "MoveStdlib", sui = "Sui" }
 
 [pinned.testnet.nvr]
-source = { git = "https://github.com/NivraLabs/nivra-court.git", subdir = "packages/nvr", rev = "1d5c38e08b75f9130216ff8420ab0f1fad0ab869" }
+source = { git = "https://github.com/NivraLabs/nivra-court.git", subdir = "packages/nvr", rev = "161af27ac2c158461024773c4ac0d740c2abc468" }
 use_environment = "testnet"
 manifest_digest = "5745706258F61D6CE210904B3E6AE87A73CE9D31A6F93BE4718C442529332A87"
 deps = { std = "MoveStdlib", sui = "Sui" }
