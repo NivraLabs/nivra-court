@@ -21,9 +21,9 @@ const MAX_APPEALS: u8 = 2;
 
 // Courts that the arbitrable contract can use.
 const TESTNET_E_COMMERCE_COURT: address = 
-    @0x131d3db250dfceae52716f0dae81863fa5ebe2b643c4aea793e5670af8a70db4;
+    @0xd2ee7d9646916d1a330a334fae7bbd1688ffa27412c13c1aeed91ad461edea21;
 const TESTNET_E_SERVICES_COURT: address =
-    @0x04b556240249bc814aeb7adc1217f15e75f083a9d6d81da7eb00101d1356b7b0;
+    @0xeb72b410672fd1e09dbdd267ef937f2eceaef07d6537254ddc6121fcf77286a9;
 
 // Dispute 1 voting options: Order not delivered yet.
 const OPTION_FULL_REFUND: vector<u8> = 
@@ -67,7 +67,7 @@ public struct Listing has key {
     id: UID,
     title: String,
     description: String,
-    category: String,
+    category: u8,
     picture: Option<Url>,
     price: u64,
     quantity: u64,
@@ -105,7 +105,7 @@ public fun new(
     marketplace: &mut Marketplace,
     title: String,
     description: String,
-    category: String,
+    category: u8,
     picture_url: Option<String>,
     price: u64,
     quantity: u64,
@@ -458,9 +458,9 @@ public fun redeem_payment(
 
 /// Choose suitable court based on category.
 fun choose_suitable_court(
-    category: String,
+    category: u8,
 ): address {
-    if (category == "services") {
+    if (category == 0) {
         TESTNET_E_SERVICES_COURT
     } else {
         TESTNET_E_COMMERCE_COURT
