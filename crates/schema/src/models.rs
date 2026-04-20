@@ -1,5 +1,5 @@
 use chrono::NaiveDateTime;
-use diesel::{AsChangeset, Identifiable, Insertable, Queryable, Selectable};
+use diesel::{AsChangeset, Identifiable, Insertable, Queryable, Selectable, prelude::Associations};
 use serde::{Deserialize, Serialize};
 use sui_field_count::FieldCount;
 
@@ -163,6 +163,39 @@ pub struct Dispute {
     pub checkpoint_timestamp_ms: i64,
 }
 
+#[derive(Queryable, Selectable, Serialize, Identifiable, Debug)]
+#[diesel(table_name = dispute, primary_key(dispute_id))]
+pub struct DisputeOutput {
+    pub dispute_id: String,
+    pub contract_id: String,
+    pub court_id: String,
+    pub description: String,
+    pub dispute_status: i16,
+    pub vote_result: Option<Vec<Option<i32>>>,
+    pub winner_option: Option<String>,
+    pub winner_party: Option<String>,
+    pub current_round: i16,
+    pub appeals_used: i16,
+    pub max_appeals: i16,
+    pub initiator: String,
+    pub last_payer: String,
+    pub options: Vec<Option<String>>,
+    pub options_party_mapping: Vec<Option<String>>,
+    pub round_init_ms: i64,
+    pub response_period_ms: i64,
+    pub draw_period_ms: i64,
+    pub evidence_period_ms: i64,
+    pub voting_period_ms: i64,
+    pub appeal_period_ms: i64,
+    pub init_nivster_count: i16,
+    pub sanction_model: i16,
+    pub coefficient: i16,
+    pub dispute_fee: i64,
+    pub treasury_share: i16,
+    pub treasury_share_nvr: i16,
+    pub empty_vote_penalty: i16,
+}
+
 #[derive(Queryable, Selectable, Serialize, Debug)]
 #[diesel(table_name = dispute, primary_key(dispute_id))]
 pub struct DisputeDetailsResponse {
@@ -175,6 +208,7 @@ pub struct DisputeDetailsResponse {
     pub winner_party: Option<String>,
     pub current_round: i16,
     pub appeals_used: i16,
+    pub last_payer: String,
     pub options: Vec<Option<String>>,
     pub options_party_mapping: Vec<Option<String>>,
     pub round_init_ms: i64,
@@ -320,8 +354,9 @@ pub struct NivsterStats {
     pub modified_at: NaiveDateTime,
 }
 
-#[derive(Queryable, Selectable, Insertable, Identifiable, Debug)]
+#[derive(Queryable, Selectable, Insertable, Identifiable, Associations, Debug)]
 #[diesel(table_name = evidence, primary_key(evidence_id))]
+#[diesel(belongs_to(DisputeOutput, foreign_key = dispute_id))]
 pub struct Evidence {
     pub evidence_id: String,
     pub dispute_id: String,
@@ -335,6 +370,23 @@ pub struct Evidence {
     pub censored: bool,
     pub modified: Option<NaiveDateTime>,
     pub sender: String,
+    pub checkpoint_timestamp_ms: i64,
+}
+
+#[derive(Queryable, Selectable, Serialize, Debug)]
+#[diesel(table_name = evidence, primary_key(evidence_id))]
+pub struct EvidenceOutput {
+    pub evidence_id: String,
+    pub dispute_id: String,
+    pub owner: String,
+    pub description: String,
+    pub src: Option<String>,
+    pub file_name: Option<String>,
+    pub file_type: Option<String>,
+    pub file_subtype: Option<String>,
+    pub encrypted: bool,
+    pub censored: bool,
+    pub modified: Option<NaiveDateTime>,
     pub checkpoint_timestamp_ms: i64,
 }
 
@@ -403,6 +455,15 @@ pub struct NewPartyNotificationRef<'a> {
 #[diesel(table_name = party_stats, primary_key(party))]
 pub struct PartyStats {
     pub party: String,
+    pub total_cases: i64,
+    pub cases_won: i64,
+    pub cases_lost: i64,
+    pub cases_cancelled: i64,
+}
+
+#[derive(Queryable, Selectable, Serialize, Debug)]
+#[diesel(table_name = party_stats, primary_key(party))]
+pub struct PartyStatsResponse {
     pub total_cases: i64,
     pub cases_won: i64,
     pub cases_lost: i64,

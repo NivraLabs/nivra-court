@@ -5,11 +5,11 @@ use clap::Parser;
 use diesel_async::RunQueryDsl;
 use diesel::{dsl::count_star, prelude::*};
 use diesel_async::{AsyncPgConnection, pooled_connection::{AsyncDieselConnectionManager, bb8::Pool}};
-use nivra_schema::{constants::DISPUTE_STATUS_COMPLETED, models::{CourtDisputeOverview, CourtResponse, DisputeDetailsResponse, NivsterCourtBalanceResult}, schema::{court, dispute, dispute_party, nivster_court_balance}};
+use nivra_schema::{constants::DISPUTE_STATUS_COMPLETED, models::{CourtDisputeOverview, CourtResponse, DisputeDetailsResponse, DisputeOutput, Evidence, EvidenceOutput, NivsterCourtBalanceResult, PartyStatsResponse}, schema::{court, dispute, dispute_party, nivster_court_balance, party_stats}};
 use serde::Deserialize;
 use url::Url;
 
-use crate::models::{CourtOverviewResponse, PartyDisputeResponse, PartyDisputesByAddressResponse};
+use crate::models::{CourtOverviewResponse, DisputeResponse, PartyDisputeResponse, PartyDisputesByAddressResponse};
 
 pub(crate) mod models;
 
@@ -50,6 +50,8 @@ async fn main() -> std::io::Result<()> {
             .service(get_stakes_by_address)
             .service(get_court_overview)
             .service(get_party_disputes_by_address)
+            .service(get_party_stats_by_address)
+            .service(get_dispute_by_id)
     })
     .bind(("0.0.0.0", server_port))?
     .run()
@@ -162,7 +164,6 @@ async fn get_party_disputes_by_address(
 ) -> actix_web::Result<impl Responder> {
     let address = address.into_inner();
 
-    // TODO: Add parallelism if multiple connections are available
     let mut conn = pool.get().await
         .map_err(error::ErrorInternalServerError)?;
 
@@ -184,26 +185,7 @@ async fn get_party_disputes_by_address(
         .await
         .map_err(error::ErrorInternalServerError)?
         .into_iter()
-        .map(|(court_name, dispute_details): (String, DisputeDetailsResponse)| PartyDisputeResponse { 
-            dispute_id: dispute_details.dispute_id, 
-            contract_id: dispute_details.contract_id, 
-            court_id: dispute_details.court_id, 
-            court_name, 
-            dispute_status: dispute_details.dispute_status, 
-            winner_option: dispute_details.winner_option, 
-            winner_party: dispute_details.winner_party, 
-            current_round: dispute_details.current_round, 
-            appeals_used: dispute_details.appeals_used, 
-            options: dispute_details.options.into_iter().map(|opt| opt.unwrap()).collect(), 
-            options_party_mapping: dispute_details.options_party_mapping.into_iter().map(|addr| addr.unwrap()).collect(), 
-            round_init_ms: dispute_details.round_init_ms, 
-            response_period_ms: dispute_details.response_period_ms, 
-            draw_period_ms: dispute_details.draw_period_ms, 
-            evidence_period_ms: dispute_details.evidence_period_ms, 
-            voting_period_ms: dispute_details.voting_period_ms, 
-            appeal_period_ms: dispute_details.appeal_period_ms, 
-            checkpoint_timestamp_ms: dispute_details.checkpoint_timestamp_ms, 
-        })
+        .map(|(court_name, dispute_details)| PartyDisputeResponse::from(court_name, dispute_details))
         .collect();
 
     let active_count = base
@@ -229,26 +211,7 @@ async fn get_party_disputes_by_address(
         .await
         .map_err(error::ErrorInternalServerError)?
         .into_iter()
-        .map(|(court_name, dispute_details): (String, DisputeDetailsResponse)| PartyDisputeResponse { 
-            dispute_id: dispute_details.dispute_id, 
-            contract_id: dispute_details.contract_id, 
-            court_id: dispute_details.court_id, 
-            court_name, 
-            dispute_status: dispute_details.dispute_status, 
-            winner_option: dispute_details.winner_option, 
-            winner_party: dispute_details.winner_party, 
-            current_round: dispute_details.current_round, 
-            appeals_used: dispute_details.appeals_used, 
-            options: dispute_details.options.into_iter().map(|opt| opt.unwrap()).collect(), 
-            options_party_mapping: dispute_details.options_party_mapping.into_iter().map(|addr| addr.unwrap()).collect(), 
-            round_init_ms: dispute_details.round_init_ms, 
-            response_period_ms: dispute_details.response_period_ms, 
-            draw_period_ms: dispute_details.draw_period_ms, 
-            evidence_period_ms: dispute_details.evidence_period_ms, 
-            voting_period_ms: dispute_details.voting_period_ms, 
-            appeal_period_ms: dispute_details.appeal_period_ms, 
-            checkpoint_timestamp_ms: dispute_details.checkpoint_timestamp_ms, 
-        })
+        .map(|(court_name, dispute_details)| PartyDisputeResponse::from(court_name, dispute_details))
         .collect();
 
     let resolved_count = base
@@ -265,4 +228,66 @@ async fn get_party_disputes_by_address(
         resolved_disputes, 
         resolved_disputes_count: resolved_count, 
     }))
+}
+
+#[get("/party_stats/{address}")]
+async fn get_party_stats_by_address(
+    address: web::Path<String>,
+    pool: web::Data<Pool<AsyncPgConnection>>,
+) -> actix_web::Result<impl Responder> {
+    let address = address.into_inner();
+
+    let mut conn = pool.get().await
+        .map_err(error::ErrorInternalServerError)?;
+
+    let party_stats: PartyStatsResponse = party_stats::table
+        .find(&address)
+        .select(PartyStatsResponse::as_select())
+        .first(&mut conn)
+        .await
+        .map_err(|e_type| {
+            match e_type {
+                diesel::result::Error::NotFound => error::ErrorNotFound(e_type),
+                _ => error::ErrorInternalServerError(e_type),
+            }
+        })?;
+
+    Ok(HttpResponse::Ok().json(party_stats))
+}
+
+#[get("/dispute/{dispute_id}")]
+async fn get_dispute_by_id(
+    dispute_id: web::Path<String>,
+    pool: web::Data<Pool<AsyncPgConnection>>,
+) -> actix_web::Result<impl Responder> {
+    let dispute_id = dispute_id.into_inner();
+
+    let mut conn = pool.get().await
+        .map_err(error::ErrorInternalServerError)?;
+
+    let (dispute, court_name) = dispute::table
+        .find(&dispute_id)
+        .inner_join(court::table)
+        .select((
+            DisputeOutput::as_select(),
+            court::name,
+        ))
+        .first::<(DisputeOutput, String)>(&mut conn)
+        .await
+        .map_err(|e_type| {
+            match e_type {
+                diesel::result::Error::NotFound => error::ErrorNotFound(e_type),
+                _ => error::ErrorInternalServerError(e_type),
+            }
+        })?;
+
+    let evidence: Vec<EvidenceOutput> = Evidence::belonging_to(&dispute)
+        .select(EvidenceOutput::as_select())
+        .load(&mut conn)
+        .await
+        .map_err(error::ErrorInternalServerError)?;
+
+    let res = DisputeResponse::from(dispute, court_name, evidence);
+
+    Ok(HttpResponse::Ok().json(res))
 }
