@@ -17,15 +17,13 @@ pub struct CourtOverviewResponse {
 }
 
 #[derive(Serialize, Debug)]
-pub struct PartyDisputesByAddressResponse {
-    pub active_disputes: Vec<PartyDisputeResponse>,
-    pub active_disputes_count: i64,
-    pub resolved_disputes: Vec<PartyDisputeResponse>,
-    pub resolved_disputes_count: i64,
+pub struct PaginatedDisputesResponse {
+    pub disputes: Vec<DisputeOverviewResponse>,
+    pub cursor: Option<i64>,
 }
 
 #[derive(Serialize, Debug)]
-pub struct PartyDisputeResponse {
+pub struct DisputeOverviewResponse {
     pub dispute_id: String,
     pub contract_id: String,
     pub court_id: String,
@@ -48,12 +46,12 @@ pub struct PartyDisputeResponse {
     pub checkpoint_timestamp_ms: i64,
 }
 
-impl PartyDisputeResponse {
+impl DisputeOverviewResponse {
     pub fn from(
         court_name: String,
         dispute_details: DisputeDetailsResponse,
     ) -> Self {
-        PartyDisputeResponse { 
+        DisputeOverviewResponse { 
             dispute_id: dispute_details.dispute_id, 
             contract_id: dispute_details.contract_id, 
             court_id: dispute_details.court_id, 

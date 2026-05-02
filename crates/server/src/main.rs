@@ -9,7 +9,7 @@ use nivra_schema::{constants::DISPUTE_STATUS_COMPLETED, models::{CourtDisputeOve
 use serde::Deserialize;
 use url::Url;
 
-use crate::models::{CourtOverviewResponse, DisputeResponse, PartyDisputeResponse, PartyDisputesByAddressResponse};
+use crate::models::{CourtOverviewResponse, DisputeOverviewResponse, DisputeResponse, PaginatedDisputesResponse};
 
 pub(crate) mod models;
 
@@ -49,7 +49,8 @@ async fn main() -> std::io::Result<()> {
             .service(get_courts)
             .service(get_stakes_by_address)
             .service(get_court_overview)
-            .service(get_party_disputes_by_address)
+            .service(get_active_party_disputes_by_address)
+            .service(get_resolved_party_disputes_by_address)
             .service(get_party_stats_by_address)
             .service(get_dispute_by_id)
     })
@@ -157,76 +158,125 @@ async fn get_court_overview(
     }))
 }
 
-#[get("/party_disputes/{address}")]
-async fn get_party_disputes_by_address(
+#[derive(Deserialize)]
+struct DisputesQuery {
+    pub cursor: Option<i64>,
+    pub limit: Option<i64>,
+}
+
+#[get("/active_party_disputes/{address}")]
+async fn get_active_party_disputes_by_address(
     address: web::Path<String>,
+    params: web::Query<DisputesQuery>,
     pool: web::Data<Pool<AsyncPgConnection>>,
 ) -> actix_web::Result<impl Responder> {
     let address = address.into_inner();
 
+    // Pagination
+    let limit = params.limit.unwrap_or(10).min(10);
+    let cursor = params.cursor;
+
     let mut conn = pool.get().await
         .map_err(error::ErrorInternalServerError)?;
 
-    let base = dispute::table
-        .inner_join(dispute_party::table)
-        .filter(dispute_party::party.eq(&address));
-
-    let active_disputes: Vec<PartyDisputeResponse> = base
-        .clone()
-        .inner_join(court::table)
+    let mut query = dispute_party::table
+        .filter(dispute_party::party.eq(&address))
+        .inner_join(dispute::table.inner_join(court::table))
         .filter(dispute::dispute_status.lt(DISPUTE_STATUS_COMPLETED))
-        .order(dispute::round_init_ms.desc())
-        .limit(10)
+        .order(dispute::checkpoint_timestamp_ms.desc())
+        .into_boxed();
+
+    if let Some(cursor) = cursor {
+        query = query.filter(dispute::checkpoint_timestamp_ms.lt(cursor));
+    }
+
+    let result: Vec<(String, DisputeDetailsResponse)> = query
+        .limit(limit + 1)
         .select((
             court::name,
             DisputeDetailsResponse::as_select(),
         ))
         .load::<(String, DisputeDetailsResponse)>(&mut conn)
         .await
-        .map_err(error::ErrorInternalServerError)?
-        .into_iter()
-        .map(|(court_name, dispute_details)| PartyDisputeResponse::from(court_name, dispute_details))
-        .collect();
-
-    let active_count = base
-        .clone()
-        .filter(dispute::dispute_status.lt(DISPUTE_STATUS_COMPLETED))
-        .select(count_star())
-        .get_result::<i64>(&mut conn)
-        .await
         .map_err(error::ErrorInternalServerError)?;
 
+    let has_more = result.len() > limit as usize;
 
-    let resolved_disputes: Vec<PartyDisputeResponse> = base
-        .clone()
-        .inner_join(court::table)
+    let resolved_disputes: Vec<DisputeOverviewResponse> = result
+        .into_iter()
+        .map(|(court_name, dispute_details)| DisputeOverviewResponse::from(court_name, dispute_details))
+        .take(limit as usize)
+        .collect();
+
+    let next_cursor = if has_more {
+        resolved_disputes
+        .last()
+        .map(|d| d.checkpoint_timestamp_ms)
+    } else {
+        None
+    };
+
+    Ok(HttpResponse::Ok().json(PaginatedDisputesResponse { 
+        disputes: resolved_disputes, 
+        cursor: next_cursor,
+    }))
+}
+
+#[get("/resolved_party_disputes/{address}")]
+async fn get_resolved_party_disputes_by_address(
+    address: web::Path<String>,
+    params: web::Query<DisputesQuery>,
+    pool: web::Data<Pool<AsyncPgConnection>>,
+) -> actix_web::Result<impl Responder> {
+    let address = address.into_inner();
+
+    // Pagination
+    let limit = params.limit.unwrap_or(10).min(10);
+    let cursor = params.cursor;
+
+    let mut conn = pool.get().await
+        .map_err(error::ErrorInternalServerError)?;
+
+    let mut query = dispute_party::table
+        .filter(dispute_party::party.eq(&address))
+        .inner_join(dispute::table.inner_join(court::table))
         .filter(dispute::dispute_status.ge(DISPUTE_STATUS_COMPLETED))
-        .order(dispute::round_init_ms.desc())
-        .limit(10)
+        .order(dispute::checkpoint_timestamp_ms.desc())
+        .into_boxed();
+
+    if let Some(cursor) = cursor {
+        query = query.filter(dispute::checkpoint_timestamp_ms.lt(cursor));
+    }
+
+    let result: Vec<(String, DisputeDetailsResponse)> = query
+        .limit(limit + 1)
         .select((
             court::name,
             DisputeDetailsResponse::as_select(),
         ))
         .load::<(String, DisputeDetailsResponse)>(&mut conn)
         .await
-        .map_err(error::ErrorInternalServerError)?
-        .into_iter()
-        .map(|(court_name, dispute_details)| PartyDisputeResponse::from(court_name, dispute_details))
-        .collect();
-
-    let resolved_count = base
-        .clone()
-        .filter(dispute::dispute_status.ge(DISPUTE_STATUS_COMPLETED))
-        .select(count_star())
-        .get_result::<i64>(&mut conn)
-        .await
         .map_err(error::ErrorInternalServerError)?;
 
-    Ok(HttpResponse::Ok().json(PartyDisputesByAddressResponse { 
-        active_disputes, 
-        active_disputes_count: active_count, 
-        resolved_disputes, 
-        resolved_disputes_count: resolved_count, 
+    let has_more = result.len() > limit as usize;
+
+    let resolved_disputes: Vec<DisputeOverviewResponse> = result
+        .into_iter()
+        .map(|(court_name, dispute_details)| DisputeOverviewResponse::from(court_name, dispute_details))
+        .take(limit as usize)
+        .collect();
+
+    let next_cursor = if has_more {
+        resolved_disputes
+        .last()
+        .map(|d| d.checkpoint_timestamp_ms)
+    } else {
+        None
+    };
+
+    Ok(HttpResponse::Ok().json(PaginatedDisputesResponse { 
+        disputes: resolved_disputes, 
+        cursor: next_cursor,
     }))
 }
 

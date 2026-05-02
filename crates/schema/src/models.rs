@@ -348,6 +348,7 @@ pub struct NivsterStats {
     pub nivster: String,
     pub total_cases: i64,
     pub cases_won: i64,
+    pub cases_cancelled: i64,
     pub nvr_won: i64,
     pub nvr_slashes: i64,
     pub sui_won: i64,

@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS nivster_stats
     nivster                     TEXT         PRIMARY KEY,
     total_cases                 BIGINT       NOT NULL,
     cases_won                   BIGINT       NOT NULL,
+    cases_cancelled             BIGINT       NOT NULL,
     nvr_won                     BIGINT       NOT NULL,
     nvr_slashes                 BIGINT       NOT NULL,
     sui_won                     BIGINT       NOT NULL,

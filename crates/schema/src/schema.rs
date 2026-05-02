@@ -182,6 +182,7 @@ diesel::table! {
         nivster -> Text,
         total_cases -> Int8,
         cases_won -> Int8,
+        cases_cancelled -> Int8,
         nvr_won -> Int8,
         nvr_slashes -> Int8,
         sui_won -> Int8,

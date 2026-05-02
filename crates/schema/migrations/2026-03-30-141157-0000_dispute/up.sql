@@ -39,7 +39,7 @@ CREATE EXTENSION IF NOT EXISTS btree_gin;
 CREATE INDEX idx_dispute_config ON dispute USING GIN 
 (contract_id, court_id, max_appeals, options, options_party_mapping);
 
-CREATE INDEX idx_dispute_status ON dispute(dispute_status, round_init_ms);
+CREATE INDEX idx_dispute_status ON dispute(checkpoint_timestamp_ms DESC, dispute_status);
 
 CREATE TABLE IF NOT EXISTS dispute_payment
 (

@@ -133,6 +133,17 @@ impl Handler for BalanceEventHandler {
                         in_worker_pool: false, 
                         modified_at, 
                     });
+
+                    nivster_stats_updates.push(NivsterStats { 
+                        nivster: balance_event.nivster.clone(), 
+                        total_cases: 0, 
+                        cases_won: 0,
+                        cases_cancelled: 1,
+                        nvr_won: 0, 
+                        nvr_slashes: 0, 
+                        sui_won: 0, 
+                        modified_at,
+                    });
                 },
                 BALANCE_UNLOCKED_WITH_PENALTY => {
                     nivster_court_balance_updates.push(NivsterCourtBalance { 
@@ -148,7 +159,8 @@ impl Handler for BalanceEventHandler {
                     nivster_stats_updates.push(NivsterStats { 
                         nivster: balance_event.nivster.clone(), 
                         total_cases: 1, 
-                        cases_won: 0, 
+                        cases_won: 0,
+                        cases_cancelled: 0,
                         nvr_won: 0, 
                         nvr_slashes: balance_event.amount_nvr, 
                         sui_won: 0, 
@@ -169,7 +181,8 @@ impl Handler for BalanceEventHandler {
                     nivster_stats_updates.push(NivsterStats { 
                         nivster: balance_event.nivster.clone(), 
                         total_cases: 1, 
-                        cases_won: 1, 
+                        cases_won: 1,
+                        cases_cancelled: 0,
                         nvr_won: balance_event.amount_nvr, 
                         nvr_slashes: 0, 
                         sui_won: balance_event.amount_sui, 
@@ -212,6 +225,7 @@ impl Handler for BalanceEventHandler {
                 .set((
                     nivster_stats::total_cases.eq(nivster_stats::total_cases + excluded(nivster_stats::total_cases)),
                     nivster_stats::cases_won.eq(nivster_stats::cases_won + excluded(nivster_stats::cases_won)),
+                    nivster_stats::cases_cancelled.eq(nivster_stats::cases_cancelled + excluded(nivster_stats::cases_cancelled)),
                     nivster_stats::nvr_won.eq(nivster_stats::nvr_won + excluded(nivster_stats::nvr_won)),
                     nivster_stats::nvr_slashes.eq(nivster_stats::nvr_slashes + excluded(nivster_stats::nvr_slashes)),
                     nivster_stats::sui_won.eq(nivster_stats::sui_won + excluded(nivster_stats::sui_won)),
